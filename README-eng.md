@@ -2,13 +2,13 @@
 
 [ภาษาไทย](README.md) · **English**
 
-An interactive circuit simulator on a **20 × 20 node board**. Drag and drop components, wire them up, and watch current, voltage, heat and energy in real time. It is a single HTML file that runs in any modern browser, with nothing to install.
+An interactive circuit simulator on a **20 × 20 node board**. Drag and drop components, wire them up, and watch current, voltage, heat and energy in real time. It runs in any modern browser, with nothing to install.
 
 It was built to explain electrical physics problems visually (for example Thai PAT3 exam questions), not just to recite formulas.
 
 ## Getting started
 
-Open `index.html` in a browser. An internet connection is needed to load the fonts. If you enable GitHub Pages for this repository, the simulator can be used straight from a link.
+Open `index.html` in a browser (keep `style.css` and `app.js` in the same folder). An internet connection is needed to load the fonts. If you enable GitHub Pages for this repository, the simulator can be used straight from a link.
 
 ## Features
 
@@ -81,4 +81,4 @@ There are no variable resistors, transformers, transistors, op-amps or current s
 
 ## Tech
 
-Plain HTML, CSS and JavaScript in one file, with no external libraries (apart from Google Fonts). The circuit solver uses Modified Nodal Analysis, backward Euler companion models for capacitors and inductors, and Newton-Raphson iteration for diodes and LEDs. The interface is in Thai.
+Plain HTML, CSS and JavaScript split into `index.html` (page structure), `style.css` (styles) and `app.js` (program), with no build step and no external libraries (apart from Google Fonts). The circuit solver uses Modified Nodal Analysis, backward Euler companion models for capacitors and inductors, and Newton-Raphson iteration for diodes and LEDs. The interface is in Thai.
