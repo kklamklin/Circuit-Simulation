@@ -97,7 +97,7 @@ function applyData(d){
   wires = []; for (const a of d.wires.filter(a => Array.isArray(a) && a.length>=4)) addWire(...a.slice(0,4).map(v => Math.max(0,Math.min(N-1,v|0))), !!a[4]);
   numberAll(); resetSim(); dirty=true; select(null); save();
 }
-function resetSim(){ t=0; hist={v:[],i:[]}; energy={sup:0,heat:0}; parts=[]; flashes=[]; const lg=document.getElementById('log'); if (lg) lg.innerHTML=''; }
+function resetSim(){ t=0; hist={v:[],i:[]}; energy={sup:0,heat:0}; parts=[]; flashes=[]; marks=[]; const lg=document.getElementById('log'); if (lg) lg.innerHTML=''; }
 function save(){ try { localStorage.setItem('circuit-lab-v1', JSON.stringify(serialize())); } catch(e){} }
 function load(){
   try { const d = JSON.parse(localStorage.getItem('circuit-lab-v1')||'null');
@@ -396,6 +396,7 @@ function draw(){
       ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x1,y1,x2-x1,y2-y1,6) : ctx.rect(x1,y1,x2-x1,y2-y1); ctx.stroke(); }
     ctx.restore(); }
 
+  drawMarks();
   if (showHeat){
     ctx.save(); ctx.fillStyle=C.heat; ctx.strokeStyle=C.heat; ctx.lineCap='round';
     for (const c of comps){ const f=heatF(c.temp); if (f<0.04) continue;
@@ -487,43 +488,163 @@ function draw(){
 let vign=null; const bootAt=performance.now();
 
 /* ---------- explosions, sparks, smoke ---------- */
-function spawn(x, y, kind){
-  const k = reduce ? 0.35 : 1, R = Math.random;
-  const nSp = Math.round((kind==='big'?60:kind==='pop'?22:12)*k);
-  for (let j=0;j<nSp;j++){ const a=R()*Math.PI*2, v=(kind==='big'?3:1.6)+R()*(kind==='big'?8:4);
-    parts.push({t:'spark',x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v-(kind==='melt'?1:2),life:0,max:0.4+R()*0.6}); }
-  if (kind==='big') for (let j=0;j<Math.round(14*k);j++){ const a=R()*Math.PI*2, v=2+R()*5;
-    parts.push({t:'debris',x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v-3,life:0,max:0.9+R()*0.6,rot:R()*6,vr:(R()-.5)*20}); }
-  for (let j=0;j<Math.round((kind==='big'?14:6)*k);j++) parts.push({t:'smoke',x:x+(R()-.5)*.6,y:y+(R()-.5)*.4,vx:(R()-.5)*.6,vy:-.5-R()*.8,life:0,max:1.5+R()*1.5,r:.25+R()*.3});
-  flashes.push({x,y,life:0,max:kind==='big'?0.6:0.35,size:kind==='big'?2.6:kind==='pop'?1.4:0.9});
-  if (!reduce) shake=Math.max(shake, kind==='big'?0.5:kind==='pop'?0.18:0.05);
+// materials that fly out of each part when it fails: [shape, material, count]
+const MAT = { glass:'#CFE9FF', ceramic:'#D8C39B', epoxy:'#20292A', alu:'#C3CDD1', plastic:'#33403E', paper:'#E6DABA', ferrite:'#474D4C', acid:'#B8F25C' };
+const BANDS = ['#D0402F','#E8892B','#F2C94C','#8E5BD0','#3B8FE0','#6C4A2E'];
+const SHARDS = {
+  dc:   [['shell','copper',9],['lid','alu',1],['chunk','epoxy',6],['blob','acid',14]],
+  ac:   [['plate','alu',8],['chunk','plastic',7],['coil','copper',3]],
+  cap:  [['lid','alu',1],['strip','paper',9],['strip','alu',6],['blob','acid',8]],
+  res:  [['chunk','ceramic',10],['band','band',6],['lead','alu',2]],
+  bulb: [['shard','glass',18],['coil','glow',1],['lead','alu',2]],
+  led:  [['shard','led',12],['chip','alu',2],['lead','alu',2]],
+  diode:[['chunk','epoxy',9],['band','alu',2],['lead','alu',2]],
+  ind:  [['coil','copper',7],['chunk','ferrite',6]],
+  sw:   [['lever','plastic',1],['chunk','plastic',5],['plate','alu',3]],
+  am:   [['shard','glass',9],['needle','heat',1],['chunk','plastic',6]],
+  vm:   [['shard','glass',9],['needle','heat',1],['chunk','plastic',6]],
+  fuse: [['shard','glass',8],['drop','copper',10]],
+  wire: [['drop','copper',8]],
+};
+const ARCY = new Set(['dc','ac','cap','ind','sw']);   // parts that throw electric arcs
+const FLASHC = { led:'led', bulb:'glow', fuse:'copper', wire:'copper' };
+const matCol = (m, R) => m==='band' ? BANDS[Math.floor(R()*BANDS.length)] : C[m] || MAT[m];
+let marks = [], boardFlash = 0;
+
+function spawn(x, y, kind, src){
+  const k = reduce ? 0.35 : 1, R = Math.random, n = v => Math.max(1, Math.round(v*k));
+  const type = src && !src.w ? src.type : 'wire', big = kind==='big', pop = kind==='pop';
+  const pw = big ? 1 : pop ? 0.6 : 0.35, fc = C[FLASHC[type]] || C.glow;
+  // sparks: fast hot streaks
+  for (let j=0;j<n(big?70:pop?28:14);j++){ const a=R()*Math.PI*2, v=(big?3:1.6)+R()*(big?9:4);
+    parts.push({t:'spark',x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v-(kind==='melt'?1:2),life:0,max:0.35+R()*0.7}); }
+  // fireball: hot cores that bloom, rise and cool into smoke
+  for (let j=0;j<n(big?16:pop?7:3);j++){ const a=R()*Math.PI*2, v=R()*(big?3.2:1.6);
+    parts.push({t:'fire',x:x+(R()-.5)*.3,y:y+(R()-.5)*.3,vx:Math.cos(a)*v,vy:Math.sin(a)*v,r:(big?.35:.22)+R()*.2,gr:(big?1.6:.9)*(0.6+R()*.6),life:0,max:(big?.7:.45)+R()*.35,col:fc}); }
+  // debris: real pieces of this part, flung up and landing around it
+  for (const [shape, m, cnt] of SHARDS[type] || SHARDS.res){
+    for (let j=0;j<n(cnt*(big?1:pop?.75:.6));j++){ const a=R()*Math.PI*2, v=(0.8+R()*(big?6:3.5))*(shape==='lid'?0.6:1);
+      const liquid = shape==='blob' || shape==='drop';
+      parts.push({t:'deb',shape,col:matCol(m,R),x:x+(R()-.5)*.4,y:y+(R()-.5)*.4,z:.1,vx:Math.cos(a)*v,vy:Math.sin(a)*v,
+        vz:(big?7:4.5)+R()*(big?9:5)+(shape==='lid'?6:0),rot:R()*6.3,vr:(R()-.5)*(shape==='lid'?30:22),life:0,max:9,
+        sz:(liquid?.06:.1)+R()*.08,liquid,hot:shape==='drop'||(big&&R()<.4)?1:0,
+        poly:Array.from({length:5},(_,q)=>[q/5*6.283+R()*.6, .55+R()*.45]) }); } }
+  // electric arcs crawling out of sources, coils and switches
+  if (ARCY.has(type) && kind!=='melt') for (let j=0;j<n(big?6:3);j++){ const a=R()*Math.PI*2, d=(big?1.2:.7)+R()*(big?1.6:.8);
+    parts.push({t:'arc',x,y,tx:x+Math.cos(a)*d,ty:y+Math.sin(a)*d,life:0,max:.12+R()*.22,seed:R()}); }
+  for (let j=0;j<n(big?14:pop?6:3);j++) parts.push({t:'smoke',x:x+(R()-.5)*.6,y:y+(R()-.5)*.4,vx:(R()-.5)*.8,vy:-.4-R()*.9,life:0,max:1.8+R()*2,r:.22+R()*.3,d:R()});
+  for (let j=0;j<n(big?22:pop?10:5);j++) parts.push({t:'ember',x:x+(R()-.5)*.5,y,vx:(R()-.5)*1.2,vy:-.6-R()*1.6,life:0,max:1.2+R()*1.8,ph:R()*6.3});
+  flashes.push({x,y,life:0,max:big?.75:.42,size:big?2.8:pop?1.5:.9,col:fc});
+  if (big) flashes.push({x,y,life:-.08,max:.9,size:3.6,col:C.heat,ring:true});
+  if (src) marks.push({x,y,r:(big?1.5:pop?.95:.55),el:src,life:0,rays:Array.from({length:big?11:6},()=>[R()*6.283,.75+R()*.6])});
+  if (!reduce){ shake=Math.max(shake, big?.6:pop?.2:.06); if (big) boardFlash=Math.max(boardFlash,.32); }
+  if (parts.length>1600) parts.splice(0, parts.length-1600);
 }
 function updateFx(dt){
-  for (const q of parts){ q.life+=dt; q.x+=q.vx*dt; q.y+=q.vy*dt;
-    if (q.t==='smoke'){ q.vx*=0.98; q.r+=dt*0.35; } else { q.vy+=9*dt; q.vx*=0.985; if (q.rot!==undefined) q.rot+=q.vr*dt; } }
+  const R = Math.random;
+  for (const q of parts){ q.life+=dt;
+    if (q.t==='deb'){
+      if (q.hot) q.hot=Math.max(0, q.hot-dt*.45);
+      if (q.rest) continue;
+      q.x+=q.vx*dt; q.y+=q.vy*dt; q.z+=q.vz*dt; q.vz-=26*dt; q.rot+=q.vr*dt; q.vx*=.995; q.vy*=.995;
+      if (q.z<=0){ q.z=0;
+        if (q.liquid){ marks.push({x:q.x,y:q.y,r:q.sz*(1.3+R()*.8),col:q.col,hot:q.hot>0,life:0,max:q.hot?7:14,sat:Array.from({length:3},()=>[R()*6.283,1+R()*.8,.3+R()*.3])}); q.life=q.max; continue; }
+        if (Math.abs(q.vz)<2.4){ q.rest=true; q.vz=0; q.life=0; q.max=6+R()*3; }
+        else { q.vz=-q.vz*.36; q.vx*=.55; q.vy*=.55; q.vr*=.5;
+          if (q.hot && !reduce) parts.push({t:'spark',x:q.x,y:q.y,vx:(R()-.5)*3,vy:-1-R()*2,life:0,max:.25}); } }
+      continue; }
+    q.x+=q.vx*dt; q.y+=q.vy*dt;
+    if (q.t==='smoke'){ q.vx*=.98; q.vy*=.995; q.r+=dt*.4; }
+    else if (q.t==='fire'){ q.vx*=.9; q.vy=q.vy*.9-1.2*dt; q.r+=q.gr*dt*(1-q.life/q.max);
+      if (q.life+dt>=q.max) parts.push({t:'smoke',x:q.x,y:q.y,vx:q.vx*.3,vy:-.5,life:0,max:2+R()*1.5,r:q.r*.8,d:R()}); }
+    else if (q.t==='ember'){ q.vx+=Math.sin(q.life*5+q.ph)*dt*1.5; q.vy*=.99; }
+    else if (q.t==='spark'){ q.vy+=9*dt; q.vx*=.985; } }
   parts = parts.filter(q => q.life<q.max);
   for (const f of flashes) f.life+=dt; flashes = flashes.filter(f => f.life<f.max);
-  shake = Math.max(0, shake-dt);
-  for (const c of comps) if (c.broken && c.smokeT>0){ c.smokeT-=dt;
-    if (Math.random()<dt*(reduce?1.5:4)) parts.push({t:'smoke',x:(c.ax+c.bx)/2+(Math.random()-.5)*.3,y:(c.ay+c.by)/2,vx:(Math.random()-.5)*.3,vy:-.6-Math.random()*.5,life:0,max:2,r:.18}); }
+  for (const m of marks) m.life+=dt;
+  marks = marks.filter(m => m.el ? m.el.broken && (m.el.w ? wires : comps).includes(m.el) : m.life<m.max);
+  shake = Math.max(0, shake-dt); boardFlash = Math.max(0, boardFlash-dt*1.6);
+  for (const c of comps) if (c.broken && c.smokeT>0){ c.smokeT-=dt; const cx=(c.ax+c.bx)/2, cy=(c.ay+c.by)/2;
+    if (R()<dt*(reduce?1.5:4)) parts.push({t:'smoke',x:cx+(R()-.5)*.3,y:cy,vx:(R()-.5)*.3,vy:-.6-R()*.5,life:0,max:2,r:.18,d:R()});
+    if (!reduce && c.smokeT>5 && R()<dt*3) parts.push({t:'ember',x:cx+(R()-.5)*.4,y:cy,vx:(R()-.5)*.6,vy:-.5-R(),life:0,max:1+R(),ph:R()*6.3}); }
+}
+// scorch under burnt parts, and splashes of acid or molten metal
+function drawMarks(){
+  if (!marks.length) return;
+  ctx.save();
+  for (const m of marks){ const X=P(m.x), Y=P(m.y), Rr=u*m.r;
+    if (m.el){
+      const g=ctx.createRadialGradient(X,Y,0,X,Y,Rr); g.addColorStop(0,'rgba(0,0,0,.78)'); g.addColorStop(.5,'rgba(24,12,4,.5)'); g.addColorStop(1,'rgba(0,0,0,0)');
+      ctx.globalAlpha=Math.min(1,m.life*4); ctx.fillStyle=g; ctx.beginPath(); ctx.arc(X,Y,Rr,0,7); ctx.fill();
+      ctx.strokeStyle='rgba(0,0,0,.55)'; ctx.lineWidth=Math.max(1,u*.05); ctx.lineCap='round'; ctx.beginPath();
+      for (const [a,l] of m.rays){ ctx.moveTo(X+Math.cos(a)*Rr*.3,Y+Math.sin(a)*Rr*.3); ctx.lineTo(X+Math.cos(a)*Rr*l,Y+Math.sin(a)*Rr*l); } ctx.stroke();
+      if (m.life<5){ ctx.globalCompositeOperation='lighter'; ctx.globalAlpha=(1-m.life/5)*.55;
+        const h=ctx.createRadialGradient(X,Y,0,X,Y,Rr*.7); h.addColorStop(0,C.heat); h.addColorStop(1,'rgba(0,0,0,0)');
+        ctx.fillStyle=h; ctx.beginPath(); ctx.arc(X,Y,Rr*.7,0,7); ctx.fill(); ctx.globalCompositeOperation='source-over'; }
+    } else { const k=m.life/m.max, blob=()=>{ ctx.beginPath(); ctx.arc(X,Y,Rr,0,7); for (const [a,d,s] of m.sat){ ctx.moveTo(X+Math.cos(a)*Rr*d+Rr*s,Y+Math.sin(a)*Rr*d); ctx.arc(X+Math.cos(a)*Rr*d,Y+Math.sin(a)*Rr*d,Rr*s,0,7); } ctx.fill(); };
+      ctx.globalAlpha=(1-k)*(m.hot?.9:.5); ctx.fillStyle=m.hot?C.wire:m.col; blob();
+      if (m.hot && m.life<2.5){ ctx.globalCompositeOperation='lighter'; ctx.globalAlpha=1-m.life/2.5; ctx.fillStyle=C.glow; blob(); ctx.globalCompositeOperation='source-over'; } } }
+  ctx.restore();
+}
+function drawDebris(q, X, Y, s){
+  const c=q.col; ctx.fillStyle=c; ctx.strokeStyle=c; ctx.lineWidth=Math.max(1,s*.35); ctx.lineCap='round';
+  switch (q.shape){
+    case 'shard': ctx.globalAlpha*=.55+.45*Math.abs(Math.sin(q.rot*2)); ctx.beginPath(); ctx.moveTo(0,-s*1.4); ctx.lineTo(s*.9,s*.8); ctx.lineTo(-s*.5,s*.5); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle='rgba(255,255,255,.85)'; ctx.lineWidth=1; ctx.stroke(); break;
+    case 'shell': ctx.lineWidth=s*.7; ctx.beginPath(); ctx.arc(0,0,s*1.3,0,1.6); ctx.stroke(); break;
+    case 'lid': { const sq=Math.abs(Math.cos(q.rot*.5))*.8+.2; ctx.scale(1,sq); ctx.beginPath(); ctx.arc(0,0,s*1.5,0,7); ctx.fill();
+      ctx.strokeStyle='rgba(0,0,0,.6)'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(-s,0); ctx.lineTo(s,0); ctx.moveTo(0,-s); ctx.lineTo(0,s); ctx.stroke(); break; }
+    case 'plate': ctx.fillRect(-s*1.5,-s*.3,s*3,s*.6); break;
+    case 'strip': ctx.lineWidth=s*.45; ctx.beginPath(); ctx.moveTo(-s*1.6,0); ctx.quadraticCurveTo(-s*.5,-s*1.4,s*.4,0); ctx.quadraticCurveTo(s*1.2,s*1.2,s*1.8,-s*.2); ctx.stroke(); break;
+    case 'coil': ctx.beginPath(); for (let a=0;a<14;a+=.4){ const r=s*(.3+a*.09); ctx.lineTo(Math.cos(a)*r,Math.sin(a)*r); } ctx.stroke(); break;
+    case 'band': ctx.fillRect(-s*.8,-s*.45,s*1.6,s*.9); break;
+    case 'lead': ctx.lineWidth=Math.max(1,s*.22); ctx.beginPath(); ctx.moveTo(-s*1.8,0); ctx.lineTo(0,0); ctx.lineTo(s*.9,s*1.1); ctx.stroke(); break;
+    case 'chip': ctx.fillRect(-s*.5,-s*.5,s,s); break;
+    case 'lever': ctx.fillRect(-s*2,-s*.35,s*3.2,s*.7); ctx.beginPath(); ctx.arc(s*1.4,0,s*.6,0,7); ctx.fill(); break;
+    case 'needle': ctx.lineWidth=Math.max(1,s*.25); ctx.beginPath(); ctx.moveTo(-s*2,0); ctx.lineTo(s*2,0); ctx.stroke(); break;
+    case 'blob': case 'drop': ctx.beginPath(); ctx.arc(0,0,s*.8,0,7); ctx.fill(); break;
+    default: ctx.beginPath(); q.poly.forEach(([a,r],j)=>{ const px=Math.cos(a)*s*r, py=Math.sin(a)*s*r; j?ctx.lineTo(px,py):ctx.moveTo(px,py); }); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle='rgba(0,0,0,.45)'; ctx.lineWidth=1; ctx.stroke();
+  }
 }
 function drawFx(){
-  ctx.save(); ctx.globalCompositeOperation='lighter';
-  for (const f of flashes){ const k=f.life/f.max, X=P(f.x), Y=P(f.y);
-    ctx.globalAlpha=(1-k)*0.8; ctx.fillStyle=C.glow; ctx.beginPath(); ctx.arc(X,Y,u*f.size*(0.4+k*0.6),0,7); ctx.fill();
-    ctx.globalAlpha=(1-k); ctx.strokeStyle=C.heat; ctx.lineWidth=u*0.12*(1-k)+1; ctx.beginPath(); ctx.arc(X,Y,u*f.size*(0.6+k*1.6),0,7); ctx.stroke(); }
+  ctx.save();
+  // pass 1 (normal blend): smoke, debris shadows and debris
   for (const q of parts){ const k=q.life/q.max, X=P(q.x), Y=P(q.y);
-    if (q.t==='smoke'){ ctx.globalAlpha=(1-k)*0.38; ctx.fillStyle=C.smoke; ctx.beginPath(); ctx.arc(X,Y,u*q.r,0,7); ctx.fill(); }
-    else if (q.t==='spark'){ ctx.globalAlpha=1-k; ctx.strokeStyle=k<0.4?C.glow:C.heat; ctx.lineWidth=Math.max(1.5,u*0.06);
-      ctx.beginPath(); ctx.moveTo(X,Y); ctx.lineTo(X-q.vx*u*0.03,Y-q.vy*u*0.03); ctx.stroke(); }
-    else { ctx.globalAlpha=1-k*k; ctx.fillStyle=C.ink; ctx.save(); ctx.translate(X,Y); ctx.rotate(q.rot); ctx.fillRect(-u*.07,-u*.05,u*.14,u*.1); ctx.restore(); } }
+    if (q.t==='smoke'){ const r=u*q.r, g=ctx.createRadialGradient(X,Y,0,X,Y,r); g.addColorStop(0,q.d<.5?C.smoke:'#2E3A37'); g.addColorStop(1,'rgba(0,0,0,0)');
+      ctx.globalAlpha=(1-k)*(k<.1?k*10:1)*.5; ctx.fillStyle=g; ctx.beginPath(); ctx.arc(X,Y,r,0,7); ctx.fill(); }
+    else if (q.t==='deb'){ const fade=q.rest?Math.min(1,(q.max-q.life)/1.5):1, s=u*q.sz;
+      ctx.globalAlpha=.4*fade*Math.max(0,1-q.z/3); ctx.fillStyle='#000'; ctx.beginPath(); ctx.ellipse(X,Y,s*1.2,s*.6,0,0,7); ctx.fill();
+      ctx.save(); ctx.translate(X,Y-q.z*u*.55); ctx.rotate(q.rot); ctx.globalAlpha=fade; drawDebris(q,X,Y,s*(1+q.z*.08)); ctx.restore(); } }
+  // pass 2 (additive): flashes, fire, hot debris glow, sparks, embers, arcs
+  ctx.globalCompositeOperation='lighter';
+  for (const f of flashes){ if (f.life<0) continue; const k=f.life/f.max, X=P(f.x), Y=P(f.y);
+    if (f.ring){ ctx.globalAlpha=(1-k)*.7; ctx.strokeStyle=f.col; ctx.lineWidth=u*.25*(1-k)+1; ctx.beginPath(); ctx.arc(X,Y,u*f.size*k,0,7); ctx.stroke(); continue; }
+    const Rl=u*f.size*2.2, g=ctx.createRadialGradient(X,Y,0,X,Y,Rl); g.addColorStop(0,f.col); g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.globalAlpha=(1-k)*(1-k)*.55; ctx.fillStyle=g; ctx.beginPath(); ctx.arc(X,Y,Rl,0,7); ctx.fill();
+    ctx.globalAlpha=(1-k)*.9; ctx.fillStyle='#FFF6DA'; ctx.beginPath(); ctx.arc(X,Y,u*f.size*.35*(1-k*.6),0,7); ctx.fill();
+    ctx.globalAlpha=(1-k); ctx.strokeStyle=C.heat; ctx.lineWidth=u*.12*(1-k)+1; ctx.beginPath(); ctx.arc(X,Y,u*f.size*(.6+k*1.6),0,7); ctx.stroke(); }
+  for (const q of parts){ const k=q.life/q.max, X=P(q.x), Y=P(q.y);
+    if (q.t==='fire'){ const r=u*q.r, g=ctx.createRadialGradient(X,Y,0,X,Y,r);
+      g.addColorStop(0,k<.3?'#FFF6DA':C.glow); g.addColorStop(.45,k<.6?q.col:C.heat); g.addColorStop(1,'rgba(0,0,0,0)');
+      ctx.globalAlpha=(1-k)*.85; ctx.fillStyle=g; ctx.beginPath(); ctx.arc(X,Y,r,0,7); ctx.fill(); }
+    else if (q.t==='spark'){ ctx.globalAlpha=1-k; ctx.strokeStyle=k<.35?'#FFF6DA':k<.6?C.glow:C.heat; ctx.lineWidth=Math.max(1.5,u*.06);
+      ctx.beginPath(); ctx.moveTo(X,Y); ctx.lineTo(X-q.vx*u*.035,Y-q.vy*u*.035); ctx.stroke(); }
+    else if (q.t==='ember'){ ctx.globalAlpha=(1-k)*(.55+.45*Math.sin(q.life*18+q.ph)); ctx.fillStyle=k<.5?C.glow:C.heat; ctx.beginPath(); ctx.arc(X,Y,Math.max(1,u*.035),0,7); ctx.fill(); }
+    else if (q.t==='deb' && q.hot>0){ const s=u*q.sz*1.8; ctx.globalAlpha=q.hot*.8; ctx.fillStyle=C.heat; ctx.beginPath(); ctx.arc(X,Y-q.z*u*.55,s,0,7); ctx.fill(); }
+    else if (q.t==='arc'){ const tx=P(q.tx), ty=P(q.ty), R=reduce?(()=>{ let s=q.seed; return ()=>(s=(s*9301+49297)%233280/233280); })():Math.random;
+      ctx.globalAlpha=1-k; ctx.strokeStyle=C.el; ctx.shadowColor=C.el; ctx.shadowBlur=12; ctx.lineWidth=Math.max(1.2,u*.05); ctx.beginPath(); ctx.moveTo(X,Y);
+      const L=Math.hypot(tx-X,ty-Y)||1, nx=(ty-Y)/L, ny=-(tx-X)/L;
+      for (let j=1;j<=7;j++){ const f=j/7, jit=j<7?(R()-.5)*u*.5:0; ctx.lineTo(X+(tx-X)*f+nx*jit, Y+(ty-Y)*f+ny*jit); }
+      ctx.stroke(); ctx.shadowBlur=0; } }
+  if (boardFlash>0){ ctx.globalAlpha=boardFlash; ctx.fillStyle=C.glow; ctx.fillRect(-u,-u,side+2*u,side+2*u); }
   ctx.restore();
 }
 function handleEvents(){
   const log=$('#log');
   for (const e of events){
     const x=(e.ax+e.bx)/2, y=(e.ay+e.by)/2;
-    spawn(x, y, e.w ? 'melt' : BOOM[e.type]||'pop');
+    spawn(x, y, e.w ? 'melt' : BOOM[e.type]||'pop', e);
     if (!e.w) e.smokeT = e.type==='fuse' ? 1.5 : 8;
     const li=document.createElement('li'); li.textContent=e.failMsg; log.prepend(li);
     while (log.children.length>8) log.lastChild.remove();

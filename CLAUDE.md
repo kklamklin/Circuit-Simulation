@@ -75,7 +75,7 @@
 | presets | `PRESETS` วงจรตัวอย่าง, `loadPreset()` |
 | topology + solver | `build()` สร้างโหนดด้วย union-find, `solve()` Gaussian elimination, `gj()` แสตมป์อุปกรณ์, `step()` ก้าวเวลา, `thermal()`, `wireCurrents()` |
 | drawing | `drawSymbol()` วาดสัญลักษณ์, `draw()` วาดแผงทั้งหมด |
-| explosions | `spawn()`, `updateFx()`, `drawFx()` ประกายไฟ ควัน เศษชิ้นส่วน |
+| explosions | `SHARDS` เศษชิ้นส่วนเฉพาะของแต่ละอุปกรณ์ (รูปทรง วัสดุ จำนวน), `spawn(x,y,kind,src)` สร้างประกายไฟ ลูกไฟ เศษชิ้นส่วน ไฟฟ้าแลบ ควัน ถ่านไฟ, `updateFx()` (เศษชิ้นส่วนมีความสูง `z` ตกกระดอนแล้วนอนบนแผง ของเหลวกลายเป็นรอยกระเซ็น), `drawMarks()` รอยไหม้ใต้อุปกรณ์ (หายเมื่อซ่อมหรือลบ), `drawFx()` |
 | palette | แถบอุปกรณ์ซ้าย ลากวาง |
 | board interaction | pointer events บนแผง |
 | tools | แถบเครื่องมือ `setTool()`, `targetsAt()`, `undo()`, ป๊อปอัพเลือก `renderPop()` |
@@ -118,7 +118,7 @@
 | `diode` `led` | `D` `LED` | ไดโอด LED |
 | `vm` `am` | `VM` `AM` | โวลต์มิเตอร์ แอมมิเตอร์ |
 
-ถ้าเพิ่มอุปกรณ์ใหม่ ต้องแก้ครบทุกที่นี้: `T` (นิยาม), `ORDER`, `BOOM`, `PREFIX`, `TAGC`, `gj()`, `thermal()`, `failText()`, `drawSymbol()`, `CODE_T` (โค้ดข้อความ), และตารางใน `docs/circuit-code-spec.md`
+ถ้าเพิ่มอุปกรณ์ใหม่ ต้องแก้ครบทุกที่นี้: `T` (นิยาม), `ORDER`, `BOOM`, `SHARDS`, `PREFIX`, `TAGC`, `gj()`, `thermal()`, `failText()`, `drawSymbol()`, `CODE_T` (โค้ดข้อความ), และตารางใน `docs/circuit-code-spec.md`
 
 ---
 

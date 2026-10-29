@@ -17,7 +17,7 @@ Open `index.html` in a browser (keep `style.css` and `app.js` in the same folder
 - **Current direction or electron flow.** Switch the animation to see which way charge actually moves.
 - **Ideal or real circuit.** Ideal mode has sources with no internal resistance, ideal meters and diodes with no voltage drop. Real mode adds internal resistance and component ratings.
 - **Heat and energy.** Components heat up with the power they dissipate, and a summary shows energy supplied, energy turned into heat, and energy stored.
-- **Burnout and explosions** (real mode). Exceed a rating and a component burns out, explodes or melts. A fuse can cut the circuit first.
+- **Burnout and explosions** (real mode). Exceed a rating and a component burns out, explodes or melts. Each part breaks into its own debris (glass shards from a bulb, a flying lid and foil strips from a capacitor, acid splashes from a battery), with a fireball, shockwave, electric arcs and a scorch mark left on the board. A fuse can cut the circuit first.
 - **Oscilloscope.** Plot voltage and current of the selected component over time.
 - **Text circuit code.** Import and export circuits as plain text, so an AI assistant can write a circuit from a problem statement and you paste it in to build it instantly.
 - **Saved circuits** in the browser, and undo with Ctrl+Z.
