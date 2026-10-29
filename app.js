@@ -51,13 +51,21 @@ const $ = s => document.querySelector(s);
 const cv = $('#board'), ctx = cv.getContext('2d');
 const sc = $('#scope'), sctx = sc.getContext('2d');
 let u = 30, side = 600, dpr = 1;
+// phones get a lighter render: no canvas glow, pixel ratio capped at 2, fewer particles, gentler shake, at most ~60 fps
+const lite = (() => { try {
+  const small = Math.min(screen.width, screen.height) < 600;   // phones; tablets and desktop screens are wider
+  const touch = (navigator.userAgentData && navigator.userAgentData.mobile) || /Mobi|iPhone|iPod|Android/i.test(navigator.userAgent) || matchMedia('(pointer: coarse)').matches;
+  return small && touch;
+} catch(e){ return false; } })();
+document.documentElement.classList.toggle('lite', lite);
+const glow = v => lite ? 0 : v;
 
 function col(){ const s = getComputedStyle(document.documentElement); const g = n => s.getPropertyValue(n).trim();
   return { bg:g('--board'), ink:g('--ink'), muted:g('--muted'), node:g('--node'), wire:g('--wire'), copper:g('--copper'),
     accent:g('--accent'), el:g('--electron'), glow:g('--glow'), led:g('--led'), panel:g('--panel'), line:g('--line'), heat:g('--heat'), smoke:g('--smoke'), silk:g('--silk'), hole:g('--hole') }; }
 let C = col();
-try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { C = col(); drawIcons(); }); } catch(e){}
-new MutationObserver(() => { C = col(); drawIcons(); }).observe(document.documentElement, {attributes:true, attributeFilter:['data-theme']});
+try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { C = col(); layers=null; drawIcons(); }); } catch(e){}
+new MutationObserver(() => { C = col(); layers=null; drawIcons(); }).observe(document.documentElement, {attributes:true, attributeFilter:['data-theme']});
 
 /* ---------- model ---------- */
 function mk(type, ax, ay, bx, by, props){
@@ -371,19 +379,8 @@ function draw(){
   ctx.fillStyle=C.bg; ctx.fillRect(0,0,side,side);
   if (shake>0){ const a=shake*u*0.5; ctx.translate((Math.random()-.5)*a,(Math.random()-.5)*a); }
   const now=performance.now();
-  ctx.save(); ctx.strokeStyle=C.silk; ctx.globalAlpha=0.045; ctx.lineWidth=1;
-  ctx.beginPath(); for (let k=0;k<N;k++){ ctx.moveTo(P(k),P(0)); ctx.lineTo(P(k),P(N-1)); ctx.moveTo(P(0),P(k)); ctx.lineTo(P(N-1),P(k)); } ctx.stroke();
-  ctx.globalAlpha=0.35; const m0=u*0.16, L0=u*0.7;
-  ctx.beginPath();
-  for (const [cx,cy,sx,sy] of [[m0,m0,1,1],[side-m0,m0,-1,1],[m0,side-m0,1,-1],[side-m0,side-m0,-1,-1]]){ ctx.moveTo(cx+sx*L0,cy); ctx.lineTo(cx,cy); ctx.lineTo(cx,cy+sy*L0); }
-  ctx.stroke();
-  ctx.globalAlpha=0.28; ctx.fillStyle=C.silk; ctx.font=`500 ${Math.max(9,Math.round(u*0.3))}px "IBM Plex Mono", monospace`;
-  ctx.textAlign='right'; ctx.textBaseline='bottom'; ctx.fillText('CIRCUIT LAB  REV 6  ·  20×20', side-u*0.95, side-u*0.05);
-  ctx.restore();
-  const pr=Math.max(1.6,u*0.075);
-  for (let y=0;y<N;y++) for (let x=0;x<N;x++){
-    ctx.fillStyle=C.node; ctx.globalAlpha=0.55; ctx.beginPath(); ctx.arc(P(x),P(y),pr,0,7); ctx.fill();
-    ctx.fillStyle=C.hole; ctx.globalAlpha=1; ctx.beginPath(); ctx.arc(P(x),P(y),pr*0.45,0,7); ctx.fill(); }
+  if (!layers || layers.side!==side || layers.dpr!==dpr) buildLayers();
+  ctx.drawImage(layers.grid,0,0,side,side);
 
   const deg = new Map(); const bump=k=>deg.set(k,(deg.get(k)||0)+1);
   for (const w of wires){ bump(K(w.ax,w.ay)); bump(K(w.bx,w.by)); }
@@ -392,7 +389,7 @@ function draw(){
   if (sel){ ctx.save(); ctx.strokeStyle=C.accent; ctx.globalAlpha=0.16; ctx.lineCap='round'; ctx.lineWidth=sel.w?u*0.42:u*1.0;
     ctx.beginPath(); ctx.moveTo(P(sel.ax),P(sel.ay)); ctx.lineTo(P(sel.bx),P(sel.by)); ctx.stroke();
     if (!sel.w){ const x1=Math.min(P(sel.ax),P(sel.bx))-u*0.55, y1=Math.min(P(sel.ay),P(sel.by))-u*0.55, x2=Math.max(P(sel.ax),P(sel.bx))+u*0.55, y2=Math.max(P(sel.ay),P(sel.by))+u*0.55;
-      ctx.globalAlpha=0.9; ctx.lineWidth=1.5; ctx.setLineDash([5,4]); ctx.lineDashOffset=-now*0.02; ctx.shadowColor=C.accent; ctx.shadowBlur=8;
+      ctx.globalAlpha=0.9; ctx.lineWidth=1.5; ctx.setLineDash([5,4]); ctx.lineDashOffset=-now*0.02; ctx.shadowColor=C.accent; ctx.shadowBlur=glow(8);
       ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x1,y1,x2-x1,y2-y1,6) : ctx.rect(x1,y1,x2-x1,y2-y1); ctx.stroke(); }
     ctx.restore(); }
 
@@ -427,7 +424,7 @@ function draw(){
     const ang=Math.atan2(c.by-c.ay, c.bx-c.ax);
     ctx.save(); ctx.translate(P(c.ax),P(c.ay)); ctx.rotate(ang);
     ctx.fillStyle=C.bg; ctx.fillRect(u*0.3,-u*0.5,u*1.4,u);
-    if (c.off){ ctx.globalAlpha=0.35; } else { ctx.shadowColor='rgba(216,232,225,.45)'; ctx.shadowBlur=u*0.25; }
+    if (c.off){ ctx.globalAlpha=0.35; } else { ctx.shadowColor='rgba(216,232,225,.45)'; ctx.shadowBlur=glow(u*0.25); }
     drawSymbol(ctx,c,u,Object.assign({},C,{ink:C.silk}),ang); ctx.restore();
   }
 
@@ -449,7 +446,7 @@ function draw(){
   if (tool==='rotate' && lastG && !drag){
     const c=rotTarget(lastG);
     if (c){ const mx=(P(c.ax)+P(c.bx))/2, my=(P(c.ay)+P(c.by))/2, R=u*1.25;
-      ctx.save(); ctx.strokeStyle=C.accent; ctx.fillStyle=C.accent; ctx.shadowColor=C.accent; ctx.shadowBlur=12; ctx.lineCap='round';
+      ctx.save(); ctx.strokeStyle=C.accent; ctx.fillStyle=C.accent; ctx.shadowColor=C.accent; ctx.shadowBlur=glow(12); ctx.lineCap='round';
       ctx.globalAlpha=0.4; ctx.lineWidth=u*0.85; ctx.beginPath(); ctx.moveTo(P(c.ax),P(c.ay)); ctx.lineTo(P(c.bx),P(c.by)); ctx.stroke();
       ctx.globalAlpha=0.95; ctx.lineWidth=2; const a0=-Math.PI*0.85, a1=-Math.PI*0.15;
       ctx.beginPath(); ctx.arc(mx,my,R,a0,a1); ctx.stroke();
@@ -459,7 +456,7 @@ function draw(){
   }
   if ((tool==='delete'||tool==='select') && lastG && !drag){
     const tg=targetsAt(lastG), hc=tool==='delete'?C.heat:C.accent;
-    ctx.save(); ctx.strokeStyle=hc; ctx.lineCap='round'; ctx.shadowColor=hc; ctx.shadowBlur=12;
+    ctx.save(); ctx.strokeStyle=hc; ctx.lineCap='round'; ctx.shadowColor=hc; ctx.shadowBlur=glow(12);
     for (const it of tg.items){ const el=it.c||it.w; ctx.globalAlpha=0.45; ctx.lineWidth=it.c?u*0.85:u*0.34;
       ctx.beginPath(); ctx.moveTo(P(el.ax),P(el.ay)); ctx.lineTo(P(el.bx),P(el.by)); ctx.stroke(); }
     if (tg.node){ ctx.globalAlpha=1; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(P(tg.node.x),P(tg.node.y),u*0.3,0,7); ctx.stroke(); }
@@ -468,7 +465,7 @@ function draw(){
   drawFx();
 
   if (drag && drag.mode==='wire'){
-    ctx.save(); ctx.strokeStyle=C.accent; ctx.lineWidth=Math.max(1.6,u*0.09); ctx.setLineDash([u*0.2,u*0.15]); ctx.lineDashOffset=-now*0.03; ctx.shadowColor=C.accent; ctx.shadowBlur=10;
+    ctx.save(); ctx.strokeStyle=C.accent; ctx.lineWidth=Math.max(1.6,u*0.09); ctx.setLineDash([u*0.2,u*0.15]); ctx.lineDashOffset=-now*0.03; ctx.shadowColor=C.accent; ctx.shadowBlur=glow(10);
     ctx.beginPath(); ctx.moveTo(P(drag.from.x),P(drag.from.y)); ctx.lineTo(P(drag.to.x),P(drag.to.y)); ctx.stroke(); ctx.restore();
     ctx.fillStyle=C.accent; ctx.beginPath(); ctx.arc(P(drag.to.x),P(drag.to.y),u*0.17,0,7); ctx.fill();
   }
@@ -476,16 +473,38 @@ function draw(){
     const g=placing.g, gc={type:placing.type,glow:0,on:true,ax:g.x-1,ay:g.y,bx:g.x+1,by:g.y}; clampC(gc);
     ctx.save(); ctx.globalAlpha=0.55; ctx.translate(P(gc.ax),P(gc.ay)); drawSymbol(ctx,gc,u,C,0); ctx.restore();
   }
-  if (hover && !drag){ const pz=reduce?0:Math.sin(now/220)*0.05; ctx.save(); ctx.strokeStyle=C.accent; ctx.shadowColor=C.accent; ctx.shadowBlur=10; ctx.lineWidth=1.6;
+  if (hover && !drag){ const pz=reduce?0:Math.sin(now/220)*0.05; ctx.save(); ctx.strokeStyle=C.accent; ctx.shadowColor=C.accent; ctx.shadowBlur=glow(10); ctx.lineWidth=1.6;
     ctx.beginPath(); ctx.arc(P(hover.x),P(hover.y),u*(0.24+pz),0,7); ctx.stroke(); ctx.restore(); }
-  if (!vign || vign.s!==side){ vign=ctx.createRadialGradient(side/2,side/2,side*0.3,side/2,side/2,side*0.75); vign.addColorStop(0,'rgba(0,0,0,0)'); vign.addColorStop(1,'rgba(0,0,0,0.38)'); vign.s=side; }
-  ctx.fillStyle=vign; ctx.fillRect(-20,-20,side+40,side+40);
+  ctx.setTransform(dpr,0,0,dpr,0,0); ctx.drawImage(layers.vign,0,0,side,side);
   const bt=(now-bootAt)/900;
   if (bt<1 && !reduce){ const x=bt*side*1.1;
     ctx.save(); ctx.fillStyle=C.bg; ctx.globalAlpha=0.85; ctx.fillRect(x,0,side-x+20,side);
-    ctx.globalAlpha=1; ctx.fillStyle=C.accent; ctx.shadowColor=C.accent; ctx.shadowBlur=24; ctx.fillRect(x-2,0,3,side); ctx.restore(); }
+    ctx.globalAlpha=1; ctx.fillStyle=C.accent; ctx.shadowColor=C.accent; ctx.shadowBlur=glow(24); ctx.fillRect(x-2,0,3,side); ctx.restore(); }
 }
-let vign=null; const bootAt=performance.now();
+// the grid, pads and silkscreen never change between frames, and a full-board gradient is costly to fill every frame (mostly on phones),
+// so both are drawn once per size into offscreen canvases
+let layers=null; const bootAt=performance.now();
+function buildLayers(){
+  const mkL=()=>{ const c=document.createElement('canvas'); c.width=cv.width; c.height=cv.height; const x=c.getContext('2d'); x.setTransform(dpr,0,0,dpr,0,0); return [c,x]; };
+  const [grid,x]=mkL(), Pl=g=>(g+0.5)*u;
+  x.save(); x.strokeStyle=C.silk; x.globalAlpha=0.045; x.lineWidth=1;
+  x.beginPath(); for (let k=0;k<N;k++){ x.moveTo(Pl(k),Pl(0)); x.lineTo(Pl(k),Pl(N-1)); x.moveTo(Pl(0),Pl(k)); x.lineTo(Pl(N-1),Pl(k)); } x.stroke();
+  x.globalAlpha=0.35; const m0=u*0.16, L0=u*0.7;
+  x.beginPath();
+  for (const [cx,cy,sx,sy] of [[m0,m0,1,1],[side-m0,m0,-1,1],[m0,side-m0,1,-1],[side-m0,side-m0,-1,-1]]){ x.moveTo(cx+sx*L0,cy); x.lineTo(cx,cy); x.lineTo(cx,cy+sy*L0); }
+  x.stroke();
+  x.globalAlpha=0.28; x.fillStyle=C.silk; x.font=`500 ${Math.max(9,Math.round(u*0.3))}px "IBM Plex Mono", monospace`;
+  x.textAlign='right'; x.textBaseline='bottom'; x.fillText('CIRCUIT LAB  REV 6  ·  20×20', side-u*0.95, side-u*0.05);
+  x.restore();
+  const pr=Math.max(1.6,u*0.075);
+  for (let y=0;y<N;y++) for (let k=0;k<N;k++){
+    x.fillStyle=C.node; x.globalAlpha=0.55; x.beginPath(); x.arc(Pl(k),Pl(y),pr,0,7); x.fill();
+    x.fillStyle=C.hole; x.globalAlpha=1; x.beginPath(); x.arc(Pl(k),Pl(y),pr*0.45,0,7); x.fill(); }
+  const [vign,v]=mkL(), g=v.createRadialGradient(side/2,side/2,side*0.3,side/2,side/2,side*0.75);
+  g.addColorStop(0,'rgba(0,0,0,0)'); g.addColorStop(1,'rgba(0,0,0,0.38)'); v.fillStyle=g; v.fillRect(0,0,side,side);
+  layers={grid, vign, side, dpr};
+}
+try { document.fonts.ready.then(() => { layers=null; }); } catch(e){}
 
 /* ---------- explosions, sparks, smoke ---------- */
 // materials that fly out of each part when it fails: [shape, material, count]
@@ -512,7 +531,7 @@ const matCol = (m, R) => m==='band' ? BANDS[Math.floor(R()*BANDS.length)] : C[m]
 let marks = [], boardFlash = 0;
 
 function spawn(x, y, kind, src){
-  const k = reduce ? 0.35 : 1, R = Math.random, n = v => Math.max(1, Math.round(v*k));
+  const k = reduce ? 0.35 : lite ? 0.5 : 1, R = Math.random, n = v => Math.max(1, Math.round(v*k));
   const type = src && !src.w ? src.type : 'wire', big = kind==='big', pop = kind==='pop';
   const fc = C[FLASHC[type]] || C.glow, p0 = parts.length, f0 = flashes.length;
   // sparks: fast hot streaks
@@ -540,8 +559,8 @@ function spawn(x, y, kind, src){
   for (let j=p0;j<parts.length;j++) parts[j].src=src;
   for (let j=f0;j<flashes.length;j++) flashes[j].src=src;
   if (src) marks.push({x,y,r:(big?1.5:pop?.95:.55),src,scorch:true,life:0,rays:Array.from({length:big?11:6},()=>[R()*6.283,.75+R()*.6])});
-  if (!reduce){ shake=Math.max(shake, big?.6:pop?.2:.06); if (big) boardFlash=Math.max(boardFlash,.32); }
-  if (parts.length>1600) parts.splice(0, parts.length-1600);
+  if (!reduce){ shake=Math.max(shake, (big?.6:pop?.2:.06)*(lite?.5:1)); if (big) boardFlash=Math.max(boardFlash, lite?.2:.32); }
+  const cap = lite ? 700 : 1600; if (parts.length>cap) parts.splice(0, parts.length-cap);
 }
 function updateFx(dt){
   const R = Math.random;
@@ -570,7 +589,7 @@ function updateFx(dt){
   marks = marks.filter(m => (!m.src || live.has(m.src)) && (m.scorch || m.life<m.max));
   shake = Math.max(0, shake-dt); boardFlash = Math.max(0, boardFlash-dt*1.6);
   for (const c of comps) if (c.broken && c.smokeT>0){ c.smokeT-=dt; const cx=(c.ax+c.bx)/2, cy=(c.ay+c.by)/2;
-    if (R()<dt*(reduce?1.5:4)) parts.push({t:'smoke',x:cx+(R()-.5)*.3,y:cy,vx:(R()-.5)*.3,vy:-.6-R()*.5,life:0,max:2,r:.18,d:R(),src:c});
+    if (R()<dt*(reduce?1.5:lite?2.5:4)) parts.push({t:'smoke',x:cx+(R()-.5)*.3,y:cy,vx:(R()-.5)*.3,vy:-.6-R()*.5,life:0,max:2,r:.18,d:R(),src:c});
     if (!reduce && c.smokeT>5 && R()<dt*3) parts.push({t:'ember',x:cx+(R()-.5)*.4,y:cy,vx:(R()-.5)*.6,vy:-.5-R(),life:0,max:1+R(),ph:R()*6.3,src:c}); }
 }
 // scorch under burnt parts, and splashes of acid or molten metal
@@ -638,7 +657,7 @@ function drawFx(){
     else if (q.t==='ember'){ ctx.globalAlpha=(1-k)*(.55+.45*Math.sin(q.life*18+q.ph)); ctx.fillStyle=k<.5?C.glow:C.heat; ctx.beginPath(); ctx.arc(X,Y,Math.max(1,u*.035),0,7); ctx.fill(); }
     else if (q.t==='deb' && q.hot>0){ const s=u*q.sz*1.8; ctx.globalAlpha=q.hot*.8; ctx.fillStyle=C.heat; ctx.beginPath(); ctx.arc(X,Y-q.z*u*.55,s,0,7); ctx.fill(); }
     else if (q.t==='arc'){ const tx=P(q.tx), ty=P(q.ty), R=reduce?(()=>{ let s=q.seed; return ()=>(s=(s*9301+49297)%233280/233280); })():Math.random;
-      ctx.globalAlpha=1-k; ctx.strokeStyle=C.el; ctx.shadowColor=C.el; ctx.shadowBlur=12; ctx.lineWidth=Math.max(1.2,u*.05); ctx.beginPath(); ctx.moveTo(X,Y);
+      ctx.globalAlpha=1-k; ctx.strokeStyle=C.el; ctx.shadowColor=C.el; ctx.shadowBlur=glow(12); ctx.lineWidth=Math.max(1.2,u*.05); ctx.beginPath(); ctx.moveTo(X,Y);
       const L=Math.hypot(tx-X,ty-Y)||1, nx=(ty-Y)/L, ny=-(tx-X)/L;
       for (let j=1;j<=7;j++){ const f=j/7, jit=j<7?(R()-.5)*u*.5:0; ctx.lineTo(X+(tx-X)*f+nx*jit, Y+(ty-Y)*f+ny*jit); }
       ctx.stroke(); ctx.shadowBlur=0; } }
@@ -661,7 +680,7 @@ function handleEvents(){
 /* ---------- palette ---------- */
 const pal = $('#palette');
 for (const type of ORDER){
-  const b=document.createElement('button'); b.className='pal'; b.dataset.type=type; b.setAttribute('aria-pressed','false');
+  const b=document.createElement('button'); b.className='pal'; b.dataset.type=type; b.setAttribute('aria-pressed','false'); b.setAttribute('aria-label',T[type].name);
   b.innerHTML=`<canvas width="96" height="52"></canvas><span>${T[type].name}</span>`; pal.appendChild(b);
   b.addEventListener('pointerdown', e => { e.preventDefault(); b.setPointerCapture(e.pointerId); placing={type,sx:e.clientX,sy:e.clientY,moved:false,g:null}; });
   b.addEventListener('pointermove', e => { if (!placing) return;
@@ -813,7 +832,7 @@ function deleteAt(g){
 function openSelect(g, e){
   const tg=targetsAt(g);
   if (!tg.items.length){ closePop(); select(null); return; }
-  const r=$('#wrap').getBoundingClientRect();
+  const r=stage.getBoundingClientRect();
   popAnchor={ node:tg.node, x:e.clientX-r.left, y:e.clientY-r.top, ids:tg.items.map(it=>it.c?'c'+it.c.id:'w'+it.w.id) };
   popEdit.clear();
   if (tg.items.length===1 && tg.items[0].c && shownFields(tg.items[0].c.type).length) popEdit.add(tg.items[0].c.id);
@@ -838,9 +857,10 @@ function renderPop(){
     }
   }
   pop.innerHTML=h; pop.hidden=false;
-  const W=$('#wrap').clientWidth, H=$('#wrap').clientHeight, pw=pop.offsetWidth, ph=pop.offsetHeight;
+  const W=stage.clientWidth, H=stage.clientHeight, pw=pop.offsetWidth, ph=pop.offsetHeight;
   pop.style.left=Math.max(4, Math.min(popAnchor.x+14, W-pw-4))+'px';
-  let top=popAnchor.y+14; if (top+ph>H-4) top=Math.max(4, popAnchor.y-ph-14);
+  // below the tap unless it does not fit and there is more room above; on a small board it may hang past the bottom edge rather than cover the tap
+  let top=popAnchor.y+14; if (top+ph>H-4 && popAnchor.y>H-popAnchor.y) top=Math.max(4, popAnchor.y-ph-14);
   pop.style.top=top+'px';
 }
 $('#pop').addEventListener('click', e=>{
@@ -949,7 +969,7 @@ function updateList(){
   }
 }
 function updateStatusHint(){
-  status.textContent = pendingPlace ? `แตะจุดบนแผงเพื่อวาง${T[pendingPlace].name} · กด Esc เพื่อยกเลิก` : (toast && performance.now()<toast.until ? toast.text : TOOL_HINT[tool]);
+  status.textContent = pendingPlace ? `แตะจุดบนแผงเพื่อวาง${T[pendingPlace].name} · แตะ${T[pendingPlace].name}อีกครั้งหรือกด Esc เพื่อยกเลิก` : (toast && performance.now()<toast.until ? toast.text : TOOL_HINT[tool]);
   updateVars();
 }
 function updateEnergy(){
@@ -966,7 +986,7 @@ function drawScope(){
   sctx.strokeStyle=C.line; sctx.lineWidth=1; sctx.beginPath(); sctx.moveTo(0,h/2); sctx.lineTo(w,h/2); sctx.stroke();
   for (let k=1;k<6;k++){ sctx.beginPath(); sctx.moveTo(w*k/6,0); sctx.lineTo(w*k/6,h); sctx.globalAlpha=.5; sctx.stroke(); sctx.globalAlpha=1; }
   const tr=(arr,color)=>{ if (arr.length<2) return 0; let m=0; for (const v of arr) m=Math.max(m,Math.abs(v)); const sc2=m>1e-12?(h/2-8)/m:0;
-    sctx.strokeStyle=color; sctx.lineWidth=2; sctx.shadowColor=color; sctx.shadowBlur=8; sctx.beginPath(); arr.forEach((v,k)=>{ const x=w-(arr.length-1-k)*(w/359), y=h/2-v*sc2; k?sctx.lineTo(x,y):sctx.moveTo(x,y); }); sctx.stroke(); return m; };
+    sctx.strokeStyle=color; sctx.lineWidth=2; sctx.shadowColor=color; sctx.shadowBlur=glow(8); sctx.beginPath(); arr.forEach((v,k)=>{ const x=w-(arr.length-1-k)*(w/359), y=h/2-v*sc2; k?sctx.lineTo(x,y):sctx.moveTo(x,y); }); sctx.stroke(); return m; };
   const mv = sel && !sel.w ? tr(hist.v,C.copper) : 0, mi = sel ? tr(hist.i,C.el) : 0;
   $('#sV').textContent = sel && !sel.w ? 'สูงสุด ±'+fmt(mv,'V') : '–';
   $('#sI').textContent = sel ? 'สูงสุด ±'+fmt(mi,'A') : '–';
@@ -1169,18 +1189,34 @@ const setMode=m=>{ elMode=m; $('#mCur').setAttribute('aria-pressed',String(!m));
 $('#mCur').onclick=()=>setMode(false); $('#mEl').onclick=()=>setMode(true);
 
 /* ---------- sizing + loop ---------- */
-const wrap=$('#wrap');
+const stage=$('#stage'), compact=matchMedia('(max-width:1060px)');
 function resize(){
-  dpr=window.devicePixelRatio||1;
-  const avail=wrap.clientWidth; side=Math.max(260,Math.min(avail,680)); u=side/N;
+  const d=Math.min(window.devicePixelRatio||1, lite?2:Infinity);
+  let avail=stage.clientWidth;
+  // compact layout: the whole board has to fit under the toolbar on the first screen
+  if (compact.matches) avail=Math.min(avail, innerHeight-(stage.getBoundingClientRect().top+scrollY)-12);
+  const s=Math.max(200,Math.min(avail,680));
+  if (s===side && d===dpr && cv.width===Math.round(s*d)) return;
+  dpr=d; side=s; u=side/N;
   cv.style.width=side+'px'; cv.style.height=side+'px'; cv.width=Math.round(side*dpr); cv.height=Math.round(side*dpr);
+  document.documentElement.style.setProperty('--side', side+'px');
   drawIcons();
 }
-new ResizeObserver(resize).observe(wrap);
+// resizing inside the observer callback would change the stage it watches, so wait for the next frame
+new ResizeObserver(() => requestAnimationFrame(resize)).observe(stage);
+try { document.fonts.ready.then(resize); } catch(e){}
+
+// palette beside the board can be folded away on small screens; the choice is remembered in this browser
+const app=$('.app'), palBtn=$('#palBtn');
+function setPal(open){ app.classList.toggle('palhide', !open); palBtn.setAttribute('aria-expanded', String(open)); }
+try { setPal(JSON.parse(localStorage.getItem('circuit-lab-ui')||'{}').pal!==false); } catch(e){ setPal(true); }
+palBtn.onclick=()=>{ const open=app.classList.contains('palhide'); setPal(open);
+  try { localStorage.setItem('circuit-lab-ui', JSON.stringify({pal:open})); } catch(e){} };
 
 let last=performance.now(), fr=0, reduce=false;
 try { reduce = matchMedia('(prefers-reduced-motion: reduce)').matches; } catch(e){}
 function loop(now){
+  if (lite && now-last<10){ requestAnimationFrame(loop); return; }   // 120 Hz phones render every other frame
   const rdt=Math.min(0.05,(now-last)/1000); last=now;
   if (dirty) build();
   if (running){
