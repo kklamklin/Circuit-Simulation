@@ -778,6 +778,7 @@ function deleteSel(){
 }
 document.addEventListener('keydown', e => {
   if (!$('#confirm').hidden && e.key!=='Escape') return;
+  if (!$('#codePanel').hidden && $('#confirm').hidden){ if (e.key==='Escape') closeCode(); return; }
   if (e.target.tagName==='INPUT'||e.target.tagName==='SELECT'||e.target.tagName==='TEXTAREA') return;
   if ((e.ctrlKey||e.metaKey) && (e.key==='z'||e.key==='Z')){ e.preventDefault(); undo(); return; }
   if (['1','2','3','4','5'].includes(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey){ setTool(['smart','select','rotate','delete','idle'][+e.key-1]); return; }
@@ -1155,9 +1156,81 @@ W   15,11 15,15`;
 const cMsg=t2=>{ $('#cMsg').textContent=t2; };
 function showErrs(list){ const ul=$('#cErr'); ul.innerHTML=''; for (const e of list.slice(0,12)){ const li=document.createElement('li'); li.textContent=e; ul.appendChild(li); }
   if (list.length>12){ const li=document.createElement('li'); li.textContent=`และอีก ${list.length-12} รายการ`; ul.appendChild(li); } }
-$('#codeBtn').onclick=e=>{ const p=$('#codePanel'); p.hidden=!p.hidden; e.target.setAttribute('aria-expanded',String(!p.hidden));
-  if (!p.hidden){ if (!$('#cCode').value.trim()) $('#cCode').value=toCode(); cMsg(''); showErrs([]); $('#cCode').focus(); } };
-$('#cClose').onclick=()=>{ $('#codePanel').hidden=true; $('#codeBtn').setAttribute('aria-expanded','false'); };
+// English prompt the user pastes into an AI chat together with a picture of the problem; keep it in step with docs/circuit-code-spec.md
+const AI_PROMPT = `You are converting an electric-circuit problem (from the attached image or text) into code for "Circuit Lab", a 20x20 node board simulator.
+Reply with ONE code block that starts with "CIRCUIT v1", then a short explanation of each part and what every meter should read.
+
+BOARD
+- Grid of nodes, x and y are integers 0-19. x grows to the right, y grows downward (0,0 is top-left).
+- Every component has 2 legs, a and b, exactly 2 cells apart, horizontal or vertical only.
+  Good: "7,9 7,11" or "3,4 5,4". Bad: "7,9 7,10" (1 apart), "1,1 3,3" (diagonal).
+- The middle point between a and b is the component body, NOT a connection point.
+
+FORMAT (one item per line, "#" starts a comment)
+CIRCUIT v1 ideal=1        (ideal=1: ideal sources/meters, nothing burns; ideal=0: internal resistance, heat and burnout)
+TITLE <short name of the circuit>
+<TYPE> <a> <b> [key=value ...] [name=Label]
+W <point> <point> [<point> ...]   (wire through several points)
+- Points are written x,y with no space after the comma. Values are plain numbers with no units or prefixes (R=4700, not 4.7k; 1e-3 is fine).
+- name= has no spaces (use _), at most 12 characters, e.g. name=I_R. off=1 keeps a part on the board but disconnected.
+
+TYPES (defaults in brackets)
+DC  battery: E volts [9], r internal ohms [0.5], Pmax W [20]. Leg b is the POSITIVE terminal.
+AC  source: E PEAK volts [10], f Hz [1], r [0.5], Pmax [20]. v(t)=E*sin(2*pi*f*t) at b relative to a. If given rms, multiply by 1.414.
+R   resistor: R ohms [100], Pmax W [2]
+B   bulb: R ohms [20], Pmax W [10]
+S   switch: on=1 closed or on=0 open [1], Pmax [10]
+F   fuse: Imax A [2]
+C   capacitor: C in MICROFARADS [4700], Vmax V [25]   (0.05 F -> C=50000, 100 uF -> C=100)
+L   inductor: L henry [2], Imax A [2]
+D   diode: conducts from a (anode) to b (cathode), Pmax [1]
+LED conducts from a to b, about 2 V drop, Pmax [0.1]
+VM  voltmeter, reads V(a)-V(b), connect in PARALLEL
+AM  ammeter, reads current from a to b, connect in SERIES, Pmax [2]
+r, Pmax, Imax and Vmax only matter with ideal=0; set them well above the expected values unless the problem wants a part to fail.
+
+WIRE RULES (most important)
+1. A wire connects to EVERY grid point it passes through, not only its ends.
+2. Wires that cross or overlap on a grid point are always connected. Route around if they must not connect.
+3. A wire passing a component leg connects to that leg.
+4. Never run a wire through a component's middle point, and never wire a component's a leg straight to its b leg (that shorts it).
+5. Use only horizontal and vertical wire segments. Parts must not overlap.
+
+LAYOUT TIPS
+Put the source on the left, vertical (e.g. "DC 2,11 2,9" with + at the top), make a top rail (y=3) and a bottom rail (y=15),
+put each branch vertically 3-4 columns apart (x = 7, 11, 15), insert ammeters in the branch, put voltmeters as their own parallel branch,
+name parts to match the problem (name=R1, name=I_L, name=V_C) and keep everything within x 2-17, y 2-16.
+
+EXAMPLE (12 V battery with two 24 ohm bulbs in parallel and a voltmeter)
+CIRCUIT v1 ideal=1
+TITLE Two bulbs in parallel
+DC  2,10 2,8   E=12
+B   8,8 8,10   R=24 name=B1
+B   12,8 12,10 R=24 name=B2
+VM  16,8 16,10 name=V_B
+W   2,8 2,3 16,3 16,8
+W   8,3 8,8
+W   12,3 12,8
+W   2,10 2,15 16,15 16,10
+W   8,10 8,15
+W   12,10 12,15
+(each bulb 0.5 A, V_B reads 12 V)
+
+CHECK BEFORE ANSWERING: TITLE present; every point 0-19; every part has legs exactly 2 apart; no wire through a part's middle;
+crossings are meant to connect; DC polarity (b = +) and diode direction (a -> b) are right; every branch returns to the source;
+C is in microfarads and AC E is peak; no units after numbers.
+If the problem needs something the board lacks (transformer, transistor, op-amp, current source, variable resistor), say so and use the closest substitute.`;
+$('#cPrompt').value=AI_PROMPT;
+const codePanel=$('#codePanel');
+function openCode(){ codePanel.hidden=false; $('#codeBtn').setAttribute('aria-expanded','true'); cMsg(''); showErrs([]); if (!matchMedia('(pointer: coarse)').matches) $('#cCode').focus(); }
+function closeCode(){ codePanel.hidden=true; $('#codeBtn').setAttribute('aria-expanded','false'); }
+$('#codeBtn').onclick=()=>{ codePanel.hidden ? openCode() : closeCode(); };
+$('#cClose').onclick=closeCode;
+codePanel.addEventListener('click', e=>{ if (e.target===codePanel) closeCode(); });
+$('#cPromptCopy').onclick=()=>{ const b=$('#cPromptCopy'), ta=$('#cPrompt');
+  const done=()=>{ b.classList.add('done'); b.querySelector('span').textContent='คัดลอกแล้ว'; setTimeout(()=>{ b.classList.remove('done'); b.querySelector('span').textContent='คัดลอก'; },1800); };
+  const fallback=()=>{ ta.focus(); ta.select(); cMsg('เลือกพร็อมต์ไว้ให้แล้ว กดคัดลอกได้เลย'); };
+  try { navigator.clipboard.writeText(AI_PROMPT).then(done, fallback); } catch(e){ fallback(); } };
 $('#cExport').onclick=()=>{ $('#cCode').value=toCode(); showErrs([]); cMsg(`ดึงโค้ดแล้ว อุปกรณ์ ${comps.length} ชิ้น`); };
 $('#cSample').onclick=()=>{ $('#cCode').value=SAMPLE_CODE; showErrs([]); cMsg('ใส่โค้ดตัวอย่างแล้ว กด "นำเข้าวงจร" เพื่อสร้าง'); };
 $('#cCopy').onclick=()=>{ const ta=$('#cCode'); if (!ta.value.trim()) ta.value=toCode();
@@ -1170,7 +1243,7 @@ $('#cImport').onclick=()=>{
   if (txt[0]==='{'){ try { const d=JSON.parse(txt); res = validData(d) ? {errs:[],data:d} : {errs:['โค้ด JSON นี้ไม่ใช่วงจรจากแผงนี้']}; } catch(e){ res={errs:['โค้ด JSON ไม่ถูกต้อง']}; } }
   else res=parseCode(txt);
   if (res.errs.length){ showErrs(res.errs); cMsg(`พบปัญหา ${res.errs.length} จุด แก้แล้วกดนำเข้าอีกครั้ง`); return; }
-  const go=()=>{ pushUndo(); applyData(res.data); setCircuit(res.data.title||'วงจรจากโค้ด', true); save(); showErrs([]); cMsg(`สร้างวงจรแล้ว อุปกรณ์ ${comps.length} ชิ้น สายไฟ ${res.data.wires.length} เส้น`); };
+  const go=()=>{ pushUndo(); applyData(res.data); setCircuit(res.data.title||'วงจรจากโค้ด', true); save(); showErrs([]); closeCode(); cMsg(`สร้างวงจรแล้ว อุปกรณ์ ${comps.length} ชิ้น สายไฟ ${res.data.wires.length} เส้น`); };
   if (comps.length||wires.length) askConfirm('นำเข้าวงจรจากโค้ดแทนวงจรบนแผงตอนนี้ใช่ไหม วงจรเดิมจะหายถ้ายังไม่ได้บันทึก', 'นำเข้า', go); else go();
 };
 $('#fixall').onclick=()=>{ for (const c of comps) repair(c); for (const w of wires) repair(w); renderInsp(); };

@@ -70,18 +70,25 @@
     <ul id="sList" class="slist"></ul>
   </div>
 
-  <div id="codePanel" class="card savep" hidden>
-    <h2 style="margin:0 0 4px;font-family:var(--f-display);font-weight:500;font-size:13px;letter-spacing:.06em;color:var(--muted)">โค้ดวงจร · วางแล้วกดนำเข้า ได้แปลนวงจรทันที</h2>
-    <p class="desc" style="margin:0">หนึ่งบรรทัดคืออุปกรณ์หนึ่งชิ้นหรือสายไฟหนึ่งเส้น พิกัด x,y มีค่า 0–19 (x ไปทางขวา y ลงล่าง) ข้อความหลัง # คือหมายเหตุ</p>
-    <textarea id="cCode" spellcheck="false" aria-label="โค้ดวงจร" placeholder="CIRCUIT v1&#10;DC 3,9 3,7 E=9&#10;B  8,7 8,9 R=20&#10;W  3,7 3,3 8,3 8,7&#10;W  3,9 3,13 8,13 8,9"></textarea>
-    <div class="saverow"><button id="cImport" class="danger">นำเข้าวงจร</button><button id="cExport">ดึงโค้ดจากวงจรบนแผง</button><button id="cCopy">คัดลอกโค้ด</button><button id="cSample">ใส่ตัวอย่าง</button><button id="cClose">ปิด</button></div>
-    <p id="cMsg" class="desc" style="margin:6px 0 0"></p>
-    <ul id="cErr" class="errs"></ul>
-    <div class="cheat">
-      <span><b>DC</b> a b E= Pmax=</span><span><b>AC</b> a b E= f= Pmax=</span><span><b>R</b> a b R= Pmax=</span><span><b>B</b> a b R= Pmax=  (หลอดไฟ)</span>
-      <span><b>S</b> a b on=1|0 Pmax=</span><span><b>F</b> a b Imax=  (ฟิวส์)</span><span><b>C</b> a b C=(µF) Vmax=</span><span><b>L</b> a b L=(H) Imax=</span>
-      <span><b>D</b> a b Pmax=  (ไดโอด a→b)</span><span><b>LED</b> a b Pmax=</span><span><b>VM</b> a b  (อ่าน Va−Vb)</span><span><b>AM</b> a b  (อ่านกระแส a→b)</span>
-      <span><b>W</b> x,y x,y …  (สายไฟหลายจุด)</span><span>ทุกชิ้นใส่ <b>name=</b> ได้</span><span>DC, AC: ขั้วบวกคือจุด b</span><span>ขาอุปกรณ์ห่างกัน 2 ช่องเสมอ</span>
+  <div id="codePanel" class="modal codem" hidden>
+    <div class="mbox cbox savep" role="dialog" aria-modal="true" aria-labelledby="cHead">
+      <div class="chd"><h2 id="cHead">นำเข้าโค้ดวงจร</h2><button id="cClose" class="xbtn" aria-label="ปิด" title="ปิด"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></div>
+      <div class="clab"><label for="cPrompt">พร็อมต์ให้ AI เขียนโค้ดจากรูปโจทย์ (ภาษาอังกฤษ)</label><button id="cPromptCopy" class="cpy" title="คัดลอกพร็อมต์"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span>คัดลอก</span></button></div>
+      <textarea id="cPrompt" readonly spellcheck="false"></textarea>
+      <p class="desc chint">คัดลอกพร็อมต์ไปวางในแชต AI พร้อมแนบรูปโจทย์ แล้วนำโค้ดที่ได้มาวางในช่องด้านล่าง</p>
+      <label for="cCode" class="clab">โค้ดวงจร</label>
+      <textarea id="cCode" spellcheck="false" placeholder="วางโค้ดที่ได้จาก AI ที่นี่ ขึ้นต้นด้วย CIRCUIT v1 …"></textarea>
+      <p id="cMsg" class="desc" style="margin:0"></p>
+      <ul id="cErr" class="errs"></ul>
+      <div class="csub"><button id="cImport" class="primary">นำเข้าวงจร</button></div>
+      <div class="cmore"><button id="cExport">ดึงโค้ดจากวงจรบนแผง</button><button id="cCopy">คัดลอกโค้ด</button><button id="cSample">ใส่ตัวอย่าง</button></div>
+      <details class="cheatd"><summary>สรุปรูปแบบโค้ด</summary>
+      <div class="cheat">
+        <span><b>DC</b> a b E= Pmax=</span><span><b>AC</b> a b E= f= Pmax=</span><span><b>R</b> a b R= Pmax=</span><span><b>B</b> a b R= Pmax=  (หลอดไฟ)</span>
+        <span><b>S</b> a b on=1|0 Pmax=</span><span><b>F</b> a b Imax=  (ฟิวส์)</span><span><b>C</b> a b C=(µF) Vmax=</span><span><b>L</b> a b L=(H) Imax=</span>
+        <span><b>D</b> a b Pmax=  (ไดโอด a→b)</span><span><b>LED</b> a b Pmax=</span><span><b>VM</b> a b  (อ่าน Va−Vb)</span><span><b>AM</b> a b  (อ่านกระแส a→b)</span>
+        <span><b>W</b> x,y x,y …  (สายไฟหลายจุด)</span><span>ทุกชิ้นใส่ <b>name=</b> ได้</span><span>DC, AC: ขั้วบวกคือจุด b</span><span>ขาอุปกรณ์ห่างกัน 2 ช่องเสมอ</span>
+      </div></details>
     </div>
   </div>
 

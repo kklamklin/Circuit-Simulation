@@ -103,7 +103,26 @@ input[aria-invalid="true"]{border-color:var(--heat)!important}
 .slist li span{flex:1;min-width:0}
 .slist small{color:var(--muted);display:block}
 summary{cursor:pointer;color:var(--muted);font-size:14px}
-#cCode{min-height:190px;font-size:13px;line-height:1.55;tab-size:2;white-space:pre;overflow:auto}
+#cCode{min-height:150px;font-size:13px;line-height:1.55;tab-size:2;white-space:pre;overflow:auto}
+/* import-code popup: prompt to copy for an AI, paste box, submit */
+.codem{z-index:45;align-items:start;overflow-y:auto}
+.cbox{width:min(620px,100%);border-color:var(--accent);box-shadow:0 30px 80px rgba(0,0,0,.7),0 0 40px rgba(62,230,192,.18);display:flex;flex-direction:column;gap:6px;margin-block:auto}
+.chd{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px}
+.chd h2{margin:0}
+.xbtn{display:inline-grid;place-items:center;padding:6px;border-radius:8px}
+.clab{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:13.5px;color:var(--muted);margin-top:6px}
+.cpy{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;font-size:13px;white-space:nowrap;flex:none}
+@media (max-width:600px){ .cbox{padding:16px 14px} .savep #cCode{font-size:16px;height:140px} .savep #cPrompt{height:110px} }
+.cpy.done{color:var(--accent);border-color:var(--accent)}
+.savep #cPrompt{flex:none;height:118px;margin:0;font-size:11.5px;line-height:1.5;color:var(--muted);white-space:pre-wrap;resize:vertical}
+.chint{margin:0;font-size:12.5px}
+.savep #cCode{flex:none;height:170px;margin:0}
+.csub{display:flex;justify-content:center;margin-top:6px}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:500;padding:8px 28px;font-size:15px}
+.cmore{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
+.cmore button{font-size:12.5px;padding:3px 10px;color:var(--muted)}
+.cheatd{margin-top:4px}
+.cheatd .cheat{margin-top:6px}
 .errs{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:4px;font-size:13.5px}
 .errs li{background:var(--warn-bg);color:var(--warn-ink);border-radius:6px;padding:4px 10px}
 .cheat{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:4px 16px;font-family:var(--f-mono);font-size:12.5px;color:var(--muted);margin:10px 0 0}
@@ -177,8 +196,8 @@ button:active{transform:translateY(1px)}
 @media (max-width:1060px){
   body{padding-top:10px}
   .app{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px 8px;align-items:start;
-    grid-template-areas:"brand brand" "tools tools" "pal stage" "status status" "warn warn" "ctitle ctitle" "ctrl ctrl" "save save" "code code" "side side" "vhead vhead" "clist clist"}
-  .app.palhide{grid-template-areas:"brand brand" "tools tools" "stage stage" "status status" "warn warn" "ctitle ctitle" "ctrl ctrl" "save save" "code code" "side side" "vhead vhead" "clist clist"}
+    grid-template-areas:"brand brand" "tools tools" "pal stage" "status status" "warn warn" "ctitle ctitle" "ctrl ctrl" "save save" "side side" "vhead vhead" "clist clist"}
+  .app.palhide{grid-template-areas:"brand brand" "tools tools" "stage stage" "status status" "warn warn" "ctitle ctitle" "ctrl ctrl" "save save" "side side" "vhead vhead" "clist clist"}
   header,.main,.boardwrap{display:contents}
   header>.brand{grid-area:brand;display:flex;flex-wrap:wrap;align-items:center;gap:2px 12px}
   header>.brand .sub{flex-basis:100%;font-size:12.5px;line-height:1.35}
@@ -188,7 +207,6 @@ button:active{transform:translateY(1px)}
   header>.brand h1{font-size:24px}
   header>.bar{grid-area:ctrl}
   #savePanel{grid-area:save}
-  #codePanel{grid-area:code}
   .tools{grid-area:tools;flex-wrap:nowrap;justify-content:flex-start;min-width:0}
   .palbtn{display:inline-grid;place-items:center;flex:none;padding:6px 9px}
   .palbtn[aria-expanded="true"]{color:var(--accent);border-color:rgba(62,230,192,.45)}

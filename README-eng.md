@@ -66,7 +66,7 @@ W   3,7 3,3 8,3 8,7
 W   3,9 3,13 8,13 8,9
 ```
 
-Click **"โค้ดวงจร"** (Circuit code), paste the code, then click **"นำเข้าวงจร"** (Import) to build the circuit on the board.
+Click **"โค้ดวงจร"** (Circuit code) to open a popup. It has a ready-made English prompt: copy it into an AI chat together with a photo of the problem, paste the code the AI returns into the code box, then click **"นำเข้าวงจร"** (Import) to build the circuit on the board.
 
 The full format guide (component table, wiring rules, common mistakes, worked examples) is in [`docs/circuit-code-spec.md`](docs/circuit-code-spec.md). It is written in Thai. Attach it to an AI assistant so it can write correct circuit code from a problem.
 
