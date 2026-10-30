@@ -2,6 +2,11 @@
 const N = 20, DT = 5e-4, GMIN = 1e-9, RINT = 0.01, RAM = 1e-3, RVM = 1e7, RF = 0.05, RWH = 1e-3;
 const TA = 25, TSAFE = 100, TFAIL = 200, RAM_REAL = 0.1, RVM_REAL = 1e6;
 const DP = { diode:{Is:1e-14,nvt:0.02585}, led:{Is:1e-18,nvt:0.0517}, idiode:{Is:1e-6,nvt:0.002} };
+// LED colours: index 0 is red (the original LED, unchanged). The forward voltage at 20 mA sets the saturation current: Is = 0.02·exp(−Vf/nvt)
+const LEDC = [ {key:'red',name:'แดง',col:'#FF4D6D'}, {key:'orange',name:'ส้ม',col:'#FF8A3D',vf:2.0}, {key:'yellow',name:'เหลือง',col:'#FFD23F',vf:2.1},
+  {key:'green',name:'เขียว',col:'#3DFF8A',vf:2.2}, {key:'blue',name:'ฟ้า',col:'#4DA3FF',vf:3.0}, {key:'white',name:'ขาว',col:'#F2F6FF',vf:3.1} ];
+LEDC.forEach((o,i)=>{ DP['led'+i] = i ? {Is:0.02*Math.exp(-o.vf/DP.led.nvt), nvt:DP.led.nvt} : DP.led; });
+const ledCol = (c, fallback) => c.color ? LEDC[c.color].col : fallback;
 for (const k in DP){ const P=DP[k]; P.vcrit = P.nvt*Math.log(P.nvt/(Math.SQRT2*P.Is)); }
 
 const T = {
@@ -13,7 +18,7 @@ const T = {
   cap:{name:'ตัวเก็บประจุ',def:{C:4700,Vmax:25},desc:'เก็บประจุไว้บนแผ่นโลหะสองแผ่น เหมือนถังพักน้ำ ชาร์จเต็มแล้วกระแส DC จะหยุดไหล ค่าคงที่เวลา τ = RC ถ้าแรงดันเกินพิกัด ฉนวนข้างในจะพังและระเบิด',fields:[['C','ความจุ','µF',0.001,1e6],['Vmax','พิกัดแรงดัน','V',0.1,1e5]]},
   ind:{name:'ตัวเหนี่ยวนำ',def:{L:2,Imax:2},desc:'ขดลวดที่ต้านการเปลี่ยนแปลงของกระแส กระแสจึงค่อยๆ เพิ่ม ไม่กระโดดทันที ค่าคงที่เวลา τ = L/R ถ้ากระแสเกินพิกัด ขดลวดจะร้อนจนไหม้',fields:[['L','ความเหนี่ยวนำ','H',0.001,1000],['Imax','พิกัดกระแส','A',0.001,1e4]]},
   diode:{name:'ไดโอด',def:{Pmax:1},desc:'ยอมให้กระแสไหลทางเดียว จากฝั่งสามเหลี่ยม (แอโนด) ไปฝั่งขีด (แคโทด) ต้องมีแรงดันราว 0.7 V ก่อนจึงเริ่มนำไฟ',fields:[['Pmax','พิกัดกำลัง','W',0.01,1e5]]},
-  led:{name:'LED',def:{Pmax:0.1},desc:'ไดโอดที่เปล่งแสง นำไฟทางเดียว ต้องการแรงดันราว 2 V และควรมีตัวต้านทานอนุกรมเพื่อจำกัดกระแส ไม่อย่างนั้นจะไหม้ทันที',fields:[['Pmax','พิกัดกำลัง','W',0.001,1e5]]},
+  led:{name:'LED',def:{Pmax:0.1,color:0},desc:'ไดโอดที่เปล่งแสง นำไฟทางเดียว ต้องการแรงดันราว 2 V (แดง ส้ม เหลือง เขียว) หรือราว 3 V (ฟ้า ขาว) เลือกสีได้ และควรมีตัวต้านทานอนุกรมเพื่อจำกัดกระแส ไม่อย่างนั้นจะไหม้ทันที',fields:[['Pmax','พิกัดกำลัง','W',0.001,1e5],['color','สี','',0,5,['แดง', 'ส้ม', 'เหลือง', 'เขียว', 'ฟ้า', 'ขาว']]]},
   vm:{name:'โวลต์มิเตอร์',def:{},desc:'วัดความต่างศักย์ ต้องต่อขนาน (คร่อม) กับอุปกรณ์ ความต้านทานภายในสูงมาก จึงแทบไม่ดึงกระแส ขั้ว + คือฝั่งที่มีเครื่องหมาย',fields:[]},
   am:{name:'แอมมิเตอร์',def:{Pmax:2},desc:'วัดกระแส ต้องต่ออนุกรมในเส้นทางที่กระแสไหลผ่าน ความต้านทานภายในต่ำมาก ห้ามต่อคร่อมแหล่งจ่ายเด็ดขาด',fields:[['Pmax','พิกัดความร้อน','W',0.01,1e5]]},
   fuse:{name:'ฟิวส์',def:{Imax:2},desc:'ลวดเส้นเล็กที่จงใจให้หลอมก่อน เมื่อกระแสเกินพิกัดราว 1.5 เท่า ฟิวส์จะขาดเพื่อตัดวงจร ป้องกันอุปกรณ์อื่นและสายไฟไม่ให้ไหม้',fields:[['Imax','พิกัดกระแส','A',0.001,1e4]]},
@@ -48,7 +53,7 @@ const presetTitle = k => { const o=document.querySelector(`#preset option[value=
 const srcR = c => ideal ? RINT : c.r;
 const amR = () => ideal ? RAM : RAM_REAL;
 const vmR = () => ideal ? RVM : RVM_REAL;
-const dkey = c => (ideal && c.type==='diode') ? 'idiode' : c.type;
+const dkey = c => (ideal && c.type==='diode') ? 'idiode' : c.type==='led' ? 'led'+(c.color|0) : c.type;
 const realOnly = k => k==='r' || k==='k' || /max$/.test(k);
 const shownFields = type => T[type].fields.filter(f => !(ideal && (realOnly(f[0]) || (type==='tp' && f[0]==='L'))));
 const REAL_PRESETS = new Set(['boom','fuse','short']);
@@ -96,6 +101,11 @@ function addWire(ax,ay,bx,by,off){
 
 const PREFIX = { dc:'DC', ac:'AC', res:'R', bulb:'B', sw:'S', fuse:'F', cap:'C', ind:'L', tp:'TP', ts:'TS', gnd:'GND', diode:'D', led:'LED', vm:'VM', am:'AM' };
 const TAGC = { dc:'--copper', ac:'--copper', res:'--ink', bulb:'--ink', cap:'--ink', ind:'--ink', tp:'--ink', ts:'--ink', gnd:'--muted', sw:'--muted', fuse:'--muted', diode:'--led', led:'--led', vm:'--accent', am:'--accent' };
+// one control per field: a number box, or a drop-down when the field has an option list (6th item), e.g. the LED colour
+const fieldCtl = (c, f, extra) => { const [k,,,mn,mx,opts]=f;
+  return opts ? `<select data-cid="${c.id}" data-k="${k}" ${extra}>${opts.map((o,i)=>`<option value="${i}"${(c[k]|0)===i?' selected':''}>${o}</option>`).join('')}</select>`
+              : `<input type="number" inputmode="decimal" step="any" min="${mn}" max="${mx}" value="${c[k]}" data-cid="${c.id}" data-k="${k}" ${extra}>`; };
+const tagCol = c => ledCol(c, null) || `var(${TAGC[c.type]})`;
 const lab = c => c.name || (PREFIX[c.type] + (c.type==='tp'||c.type==='ts' ? c.grp : (c.num||'')));
 function assignNum(c){ if (c.num) return; const used=new Set(comps.filter(x=>x!==c && x.type===c.type && x.num).map(x=>x.num)); let n=1; while (used.has(n)) n++; c.num=n; }
 function numberAll(){ for (const c of comps) assignNum(c); }
@@ -356,9 +366,9 @@ function drawSymbol(x, c, uu, Cc, ang){
     case 'diode': ln(0,0,.68*uu,0); ln(1.32*uu,0,L,0); x.beginPath(); x.moveTo(.68*uu,-.32*uu); x.lineTo(.68*uu,.32*uu); x.lineTo(1.32*uu,0); x.closePath(); x.fill();
       ln(1.32*uu,-.34*uu,1.32*uu,.34*uu); break;
     case 'led': { const r=.46*uu; ln(0,0,m-r,0); ln(m+r,0,L,0);
-      if (c.glow>0.02){ x.save(); x.globalAlpha=Math.min(1,c.glow)*0.4; x.fillStyle=Cc.led; x.beginPath(); x.arc(m,0,r*(1.2+1.0*Math.min(1,c.glow)),0,7); x.fill(); x.restore(); }
+      if (c.glow>0.02){ x.save(); x.globalAlpha=Math.min(1,c.glow)*0.4; x.fillStyle=ledCol(c,Cc.led); x.beginPath(); x.arc(m,0,r*(1.2+1.0*Math.min(1,c.glow)),0,7); x.fill(); x.restore(); }
       ring(r,Cc.bg);
-      if (c.glow>0.02){ x.save(); x.globalAlpha=Math.min(.9,0.2+c.glow); x.fillStyle=Cc.led; x.beginPath(); x.arc(m,0,r-lw/2,0,7); x.fill(); x.restore(); }
+      if (c.glow>0.02){ x.save(); x.globalAlpha=Math.min(.9,0.2+c.glow); x.fillStyle=ledCol(c,Cc.led); x.beginPath(); x.arc(m,0,r-lw/2,0,7); x.fill(); x.restore(); }
       x.fillStyle=Cc.ink; x.beginPath(); x.moveTo(m-.22*uu,-.22*uu); x.lineTo(m-.22*uu,.22*uu); x.lineTo(m+.2*uu,0); x.closePath(); x.fill();
       ln(m-r,0,m-.22*uu,0); ln(m+.2*uu,0,m+r,0); ln(m+.2*uu,-.24*uu,m+.2*uu,.24*uu);
       ln(m+.05*uu,-.52*uu,m+.3*uu,-.8*uu); ln(m+.28*uu,-.44*uu,m+.53*uu,-.72*uu); break; }
@@ -589,13 +599,13 @@ const SHARDS = {
 SHARDS.tp = SHARDS.ts = SHARDS.ind;
 const ARCY = new Set(['dc','ac','cap','ind','sw']);   // parts that throw electric arcs
 const FLASHC = { led:'led', bulb:'glow', fuse:'copper', wire:'copper' };
-const matCol = (m, R) => m==='band' ? BANDS[Math.floor(R()*BANDS.length)] : C[m] || MAT[m];
+const matCol = (m, R, src) => m==='band' ? BANDS[Math.floor(R()*BANDS.length)] : m==='led' && src ? ledCol(src, C.led) : C[m] || MAT[m];
 let marks = [], boardFlash = 0;
 
 function spawn(x, y, kind, src){
   const k = reduce ? 0.35 : lite ? 0.5 : 1, R = Math.random, n = v => Math.max(1, Math.round(v*k));
   const type = src && !src.w ? src.type : 'wire', big = kind==='big', pop = kind==='pop';
-  const fc = C[FLASHC[type]] || C.glow, p0 = parts.length, f0 = flashes.length;
+  const fc = (type==='led' && src && ledCol(src,null)) || C[FLASHC[type]] || C.glow, p0 = parts.length, f0 = flashes.length;
   // sparks: fast hot streaks
   for (let j=0;j<n(big?70:pop?28:14);j++){ const a=R()*Math.PI*2, v=(big?3:1.6)+R()*(big?9:4);
     parts.push({t:'spark',x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v-(kind==='melt'?1:2),life:0,max:0.35+R()*0.7}); }
@@ -606,7 +616,7 @@ function spawn(x, y, kind, src){
   for (const [shape, m, cnt] of SHARDS[type] || SHARDS.res){
     for (let j=0;j<n(cnt*(big?1:pop?.75:.6));j++){ const a=R()*Math.PI*2, v=(0.8+R()*(big?6:3.5))*(shape==='lid'?0.6:1);
       const liquid = shape==='blob' || shape==='drop';
-      parts.push({t:'deb',shape,col:matCol(m,R),x:x+(R()-.5)*.4,y:y+(R()-.5)*.4,z:.1,vx:Math.cos(a)*v,vy:Math.sin(a)*v,
+      parts.push({t:'deb',shape,col:matCol(m,R,src),x:x+(R()-.5)*.4,y:y+(R()-.5)*.4,z:.1,vx:Math.cos(a)*v,vy:Math.sin(a)*v,
         vz:(big?7:4.5)+R()*(big?9:5)+(shape==='lid'?6:0),rot:R()*6.3,vr:(R()-.5)*(shape==='lid'?30:22),life:0,max:9,
         sz:(liquid?.06:.1)+R()*.08,liquid,hot:shape==='drop'||(big&&R()<.4)?1:0,
         poly:Array.from({length:5},(_,q)=>[q/5*6.283+R()*.6, .55+R()*.45]) }); } }
@@ -918,9 +928,9 @@ function renderPop(){
   let h=`<div class="poph"><b>${nd?`จุด (${nd.x}, ${nd.y})`:'สิ่งที่เลือก'}</b><span>${items.length} รายการ</span><button data-a="close">ปิด</button></div>`;
   for (const it of items){
     if (it.c){ const c=it.c, d=T[c.type], fs=shownFields(c.type);
-      h+=`<div class="pi${c.off?' off':''}" data-id="c${c.id}"><div class="pih"><span class="tag" style="--c:var(${TAGC[c.type]})">${lab(c)}</span><span class="cname">${d.name}${c.off?' · พักอยู่':''}${c.broken?' · ไหม้':''}</span></div>
+      h+=`<div class="pi${c.off?' off':''}" data-id="c${c.id}"><div class="pih"><span class="tag" style="--c:${tagCol(c)}">${lab(c)}</span><span class="cname">${d.name}${c.off?' · พักอยู่':''}${c.broken?' · ไหม้':''}</span></div>
         <div class="pia">${fs.length?`<button data-a="edit" aria-expanded="${popEdit.has(c.id)}">ปรับค่า</button>`:''}${c.type==='sw'?`<button data-a="sw">${c.on?'ตัดสวิตช์':'ต่อสวิตช์'}</button>`:''}<button data-a="off">${c.off?'เปิดใช้งาน':'พักการทำงาน'}</button><button data-a="del" class="danger">ลบ</button></div>
-        ${fs.length && popEdit.has(c.id) ? `<div class="cparams">${fs.map(([k,label,unit,mn,mx])=>`<label class="pf" title="${label}"><span>${k}</span><input type="number" inputmode="decimal" step="any" min="${mn}" max="${mx}" value="${c[k]}" data-cid="${c.id}" data-k="${k}" aria-label="${lab(c)} ${label}"><span>${unit}</span></label>`).join('')}</div>` : ''}</div>`;
+        ${fs.length && popEdit.has(c.id) ? `<div class="cparams">${fs.map(f=>`<label class="pf" title="${f[1]}"><span>${f[5]?f[1]:f[0]}</span>${fieldCtl(c,f,`aria-label="${lab(c)} ${f[1]}"`)}<span>${f[2]}</span></label>`).join('')}</div>` : ''}</div>`;
     } else { const w=it.w;
       h+=`<div class="pi${w.off?' off':''}" data-id="w${w.id}"><div class="pih"><span class="tag" style="--c:var(--wire)">สาย</span><span class="cname">(${w.ax}, ${w.ay}) → (${w.bx}, ${w.by})${w.off?' · พักอยู่':''}${w.broken?' · ขาด':''}</span></div>
         <div class="pia"><button data-a="off">${w.off?'เปิดใช้งาน':'พักการทำงาน'}</button><button data-a="del" class="danger">ลบ</button></div></div>`;
@@ -974,8 +984,8 @@ function renderInsp(){
   const d=T[sel.type]; shownBroken=sel.broken;
   let h=`<h3>${lab(sel)} · ${d.name}${stateTag(sel)}</h3><p class="desc">${d.desc}</p>`;
   if (sel.type!=='vm') h+=`<div class="therm" title="อุณหภูมิเทียบกับจุดไหม้ ${TFAIL} °C"><span id="rTh" style="width:0"></span></div>`;
-  for (const [k,label,unit,mn,mx] of shownFields(sel.type))
-    h+=`<label class="field"><span>${label}</span><input id="f_${k}" data-cid="${sel.id}" data-k="${k}" type="number" inputmode="decimal" min="${mn}" max="${mx}" step="any" value="${sel[k]}"><span class="unit">${unit}</span></label>`;
+  for (const f of shownFields(sel.type))
+    h+=`<label class="field"><span>${f[1]}</span>${fieldCtl(sel,f,`id="f_${f[0]}"`)}<span class="unit">${f[2]}</span></label>`;
   if (sel.type==='sw') h+=`<div class="acts" style="margin-bottom:8px"><button id="bSw">${sel.on?'เปิดวงจร (ตัดไฟ)':'ปิดวงจร (ต่อไฟ)'}</button></div>`;
   h+=`<div class="reads"><div class="read"><small>แรงดันคร่อม</small><b id="rV">–</b></div><div class="read"><small>กระแส</small><b id="rI">–</b></div><div class="read"><small>กำลัง</small><b id="rP">–</b></div>
       <div class="read"><small>อุณหภูมิ</small><b id="rT">–</b></div><div class="read"><small>ใช้พิกัดไป</small><b id="rU">–</b></div><div class="read"><small>${sel.type==='dc'||sel.type==='ac'?'พลังงานที่จ่าย':sel.type==='cap'||sel.type==='ind'?'พลังงานสะสม':'พลังงานที่ใช้'}</small><b id="rE">–</b></div></div>
@@ -1013,19 +1023,19 @@ function updateVars(){
   $('#vSub').textContent=s2;
 }
 let listSig='';
-const listSignature = () => (ideal?'I':'R') + comps.map(c=>`${c.id}.${c.num}.${c.broken?1:0}.${c.off?1:0}.${c.type==='sw'?(c.on?1:0):''}`).join('|');
+const listSignature = () => (ideal?'I':'R') + comps.map(c=>`${c.id}.${c.num}.${c.broken?1:0}.${c.off?1:0}.${c.type==='sw'?(c.on?1:0):''}${c.type==='led'?'.'+(c.color|0):''}`).join('|');
 function renderList(){
   listSig=listSignature();
   const box=$('#clist'); $('#vTitle').textContent=`อุปกรณ์บนแผง · ${comps.length} ชิ้น`;
   if (!comps.length){ box.innerHTML='<div class="empty">ยังไม่มีอุปกรณ์บนแผง ลากจากแถบอุปกรณ์มาวาง แล้วค่าของแต่ละตัวจะขึ้นที่นี่</div>'; return; }
   const sorted=[...comps].sort((a,b)=>ORDER.indexOf(a.type)-ORDER.indexOf(b.type) || a.num-b.num);
   box.innerHTML=sorted.map(c=>{ const d=T[c.type];
-    const ps=shownFields(c.type).map(([k,label,unit,mn,mx])=>`<label class="pf" title="${label}"><span>${k}</span><input type="number" inputmode="decimal" step="any" min="${mn}" max="${mx}" value="${c[k]}" data-cid="${c.id}" data-k="${k}" aria-label="${lab(c)} ${label}"><span>${unit}</span></label>`).join('');
+    const ps=shownFields(c.type).map(f=>`<label class="pf" title="${f[1]}"><span>${f[5]?f[1]:f[0]}</span>${fieldCtl(c,f,`aria-label="${lab(c)} ${f[1]}"`)}<span>${f[2]}</span></label>`).join('');
     const sw=c.type==='sw'?`<button data-act="sw">${c.on?'ต่ออยู่ · กดเพื่อตัด':'ตัดอยู่ · กดเพื่อต่อ'}</button>`:'';
     const offb=c.off?`<span class="state st-hot">พักอยู่</span><button data-act="off">เปิดใช้งาน</button>`:'';
     const fix=c.broken?`<span class="state st-dead">ไหม้แล้ว</span><button data-act="fix" class="danger">ซ่อม</button>`:'';
     const lv=[['V','v'],['I','i'],['P','p'],['T','t']].map(([sy,k])=>`<span class="lv">${sy}<b data-l="${k}">–</b></span>`).join('');
-    return `<div class="crow${c===sel?' on':''}${c.off?' off':''}" data-cid="${c.id}"><div class="chead"><span class="tag" style="--c:var(${TAGC[c.type]})">${lab(c)}</span><span class="cname">${d.name}</span>${sw}${offb}${fix}</div>${ps?`<div class="cparams">${ps}</div>`:''}<div class="clive">${lv}</div></div>`; }).join('');
+    return `<div class="crow${c===sel?' on':''}${c.off?' off':''}" data-cid="${c.id}"><div class="chead"><span class="tag" style="--c:${tagCol(c)}">${lab(c)}</span><span class="cname">${d.name}</span>${sw}${offb}${fix}</div>${ps?`<div class="cparams">${ps}</div>`:''}<div class="clive">${lv}</div></div>`; }).join('');
   updateList();
 }
 function updateList(){
@@ -1103,7 +1113,8 @@ document.addEventListener('input', e=>{
   const f=T[c.type].fields.find(x=>x[0]===el.dataset.k); if (!f) return;
   const v=parseFloat(el.value);
   if (isFinite(v) && v>=f[3] && v<=f[4]){ c[f[0]]= f[0]==='grp' ? Math.round(v) : v; if (f[0]==='grp') dirty=true; el.removeAttribute('aria-invalid'); save();
-    document.querySelectorAll(`input[data-cid="${c.id}"][data-k="${f[0]}"]`).forEach(o=>{ if (o!==el) o.value=el.value; }); }
+    if (f[0]==='color'){ c.vd=0; }
+    document.querySelectorAll(`[data-cid="${c.id}"][data-k="${f[0]}"]`).forEach(o=>{ if (o!==el) o.value=el.value; }); }
   else el.setAttribute('aria-invalid','true');
 });
 
@@ -1170,7 +1181,9 @@ function parseCode(txt){
       if (k==='on' && type==='sw'){ o.on=/^(1|on|true)$/i.test(kv[k]); continue; }
       const f=T[type].fields.find(x=>x[0]===k);
       if (!f){ errs.push(`บรรทัด ${n}: ${head} ไม่มีค่า "${k}" ใช้ได้: ${T[type].fields.map(x=>x[0]).concat(type==='sw'?['on']:[], ['name','off']).join(', ')}`); continue; }
-      const v=Number(kv[k]);
+      const ci = f[5] ? LEDC.findIndex(o=>o.key===kv[k].toLowerCase()) : -1;
+      const v = ci>=0 ? ci : Number(kv[k]);
+      if (f[5] && (!isFinite(v) || v<f[3] || v>f[4])){ errs.push(`บรรทัด ${n}: ${k}=${kv[k]} ใช้ได้: ${LEDC.map(o=>o.key).join(', ')}`); continue; }
       if (!isFinite(v) || v<f[3] || v>f[4]){ errs.push(`บรรทัด ${n}: ${k}=${kv[k]} ต้องเป็นตัวเลขระหว่าง ${f[3]} ถึง ${f[4]} (${f[2]})`); continue; }
       o[k]= k==='grp' ? Math.round(v) : v;
     }
@@ -1185,7 +1198,7 @@ function toCode(){
   const sorted=[...comps].sort((a,b)=>ORDER.indexOf(a.type)-ORDER.indexOf(b.type) || (a.num||0)-(b.num||0));
   for (const c of sorted){
     const f=T[c.type].fields, d=T[c.type].def, parts=[TYPE_CODE[c.type].padEnd(3), `${c.ax},${c.ay}`, `${c.bx},${c.by}`];
-    f.forEach(([k],ix)=>{ const rating=/max$/.test(k); if ((ix===0 && !rating) || c[k]!==d[k]) parts.push(`${k}=${num6(c[k])}`); });
+    f.forEach(([k,,,,,opts],ix)=>{ const rating=/max$/.test(k); if ((ix===0 && !rating) || c[k]!==d[k]) parts.push(`${k}=${opts ? LEDC[c[k]|0].key : num6(c[k])}`); });
     if (c.type==='sw') parts.push(`on=${c.on?1:0}`);
     if (c.name) parts.push(`name=${c.name.replace(/\s+/g,'_')}`);
     if (c.off) parts.push('off=1');
@@ -1260,7 +1273,7 @@ TS  transformer secondary coil: grp [1], Imax A [2]. A TP and a TS with the same
     With ideal=1 it is an ideal transformer (V2 = n*V1, I1 = -n*I2, L and k ignored); with ideal=0 it is two coupled coils.
 GND ground symbol: leg a connects to the net that must be 0 V, leg b is only part of the drawing and must stay unconnected. Optional; without it the board picks a reference itself.
 D   diode: conducts from a (anode) to b (cathode), Pmax [1]
-LED conducts from a to b, about 2 V drop, Pmax [0.1]
+LED conducts from a to b, Pmax [0.1], color=red|orange|yellow|green|blue|white [red]. The colour sets the drop: red/orange about 2 V, yellow 2.1 V, green 2.2 V, blue 3 V, white 3.1 V
 VM  voltmeter, reads V(a)-V(b), connect in PARALLEL
 AM  ammeter, reads current from a to b, connect in SERIES, Pmax [2]
 r, k, Pmax, Imax and Vmax only matter with ideal=0; set them well above the expected values unless the problem wants a part to fail.
@@ -1338,8 +1351,8 @@ $('#speed').onchange=e=>{ speed=parseFloat(e.target.value); };
 const setMode=m=>{ elMode=m; $('#mCur').setAttribute('aria-pressed',String(!m)); $('#mEl').setAttribute('aria-pressed',String(m)); };
 $('#mCur').onclick=()=>setMode(false); $('#mEl').onclick=()=>setMode(true);
 
-// the version (with an optional tag, e.g. '1.0.3.0 alpha') is written here and in the name of the version file ("version 1.0.2.1.txt"); change both together
-const VERSION = '1.0.2.1';
+// the version (with an optional tag, e.g. '1.0.3.0 alpha') is written here and in the name of the version file ("version 1.0.3.1.txt"); change both together
+const VERSION = '1.0.3.1';
 { const a=$('#ver'); a.textContent='เวอร์ชัน '+VERSION; a.href=encodeURI('version '+VERSION+'.txt'); a.parentElement.hidden=false; }
 
 /* ---------- sizing + loop ---------- */
