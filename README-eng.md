@@ -35,6 +35,8 @@ Open `index.html` in a browser (keep `style.css` and `app.js` in the same folder
 | Fuse | Blows when current exceeds its rating |
 | Capacitor | Value in microfarads (µF) |
 | Inductor | Value in henries (H) |
+| Transformer | A primary coil (`TP`) and a secondary coil (`TS`) paired by a group number, with a turns ratio n. Ideal mode gives an ideal transformer (V₂ = n·V₁); real mode gives coupled coils with settable L and coupling k. AC only |
+| Ground | A 0 V reference point. The potential φ shown when you point at the board is measured from it. Optional; the board picks a reference itself without one |
 | Diode / LED | Conducts from leg a to leg b |
 | Voltmeter | Connect in parallel, reads V(a) − V(b) |
 | Ammeter | Connect in series, reads current from a to b |
@@ -78,7 +80,7 @@ Key rules to remember:
 
 ## Limitations
 
-There are no variable resistors, transformers, transistors, op-amps or current sources yet. The speed of the dots moving along wires is scaled so you can see it, and is not the real drift speed of electrons.
+There are no variable resistors, transistors, op-amps or current sources yet. The speed of the dots moving along wires is scaled so you can see it, and is not the real drift speed of electrons.
 
 ## Version
 

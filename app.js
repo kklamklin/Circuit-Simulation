@@ -18,8 +18,15 @@ const T = {
   am:{name:'แอมมิเตอร์',def:{Pmax:2},desc:'วัดกระแส ต้องต่ออนุกรมในเส้นทางที่กระแสไหลผ่าน ความต้านทานภายในต่ำมาก ห้ามต่อคร่อมแหล่งจ่ายเด็ดขาด',fields:[['Pmax','พิกัดความร้อน','W',0.01,1e5]]},
   fuse:{name:'ฟิวส์',def:{Imax:2},desc:'ลวดเส้นเล็กที่จงใจให้หลอมก่อน เมื่อกระแสเกินพิกัดราว 1.5 เท่า ฟิวส์จะขาดเพื่อตัดวงจร ป้องกันอุปกรณ์อื่นและสายไฟไม่ให้ไหม้',fields:[['Imax','พิกัดกระแส','A',0.001,1e4]]},
 };
-const ORDER = ['dc','ac','res','bulb','sw','fuse','cap','ind','diode','led','vm','am'];
-const BOOM = { dc:'big', ac:'big', cap:'big', res:'big', bulb:'pop', led:'pop', diode:'pop', am:'pop', sw:'pop', ind:'pop', fuse:'melt' };
+T.gnd = {name:'จุดกราว',def:{},desc:'จุดอ้างอิงศักย์ 0 โวลต์ ต่อขา a เข้ากับจุดที่ต้องการให้เป็น 0 V แล้วศักย์ φ ของจุดอื่นบนแผงจะวัดเทียบกับจุดนี้ ขา b เป็นแค่ส่วนของสัญลักษณ์ ไม่ต้องต่ออะไร ถ้าไม่วางกราว แผงจะเลือกจุดอ้างอิงให้เอง วางหลายจุดได้ ทุกจุดจะเป็น 0 V',fields:[]};
+T.tp = {name:'ขดปฐมภูมิ',def:{grp:1,L:100,n:2,k:0.99,Imax:2},desc:'ขดลวดด้านรับไฟของหม้อแปลง จับคู่กับขดทุติยภูมิที่มีเลขคู่เดียวกัน จุดที่ขา a กับขา a ของขดทุติยภูมิมีเฟสตรงกัน หม้อแปลงทำงานกับไฟสลับ ในโหมดอุดมคติ V₂ = n·V₁ และ I₁ = −n·I₂ ส่วนโหมดจริงเป็นขดลวดคู่บนแกนเหล็ก ถ้าต่อกับไฟตรงกระแสจะไต่ขึ้นเรื่อยๆ เพราะแบบจำลองไม่มีความต้านทานขดลวด',
+  fields:[['grp','เลขคู่ (ขดทุติยภูมิใช้เลขเดียวกัน)','',1,99],['L','ความเหนี่ยวนำขดปฐมภูมิ','H',0.001,1e4],['n','อัตราส่วนรอบ N₂/N₁','',0.01,100],['k','ค่าคัปปลิง','',0.5,0.9999],['Imax','พิกัดกระแส','A',0.001,1e4]]};
+T.ts = {name:'ขดทุติยภูมิ',def:{grp:1,Imax:2},desc:'ขดลวดด้านจ่ายไฟของหม้อแปลง จับคู่กับขดปฐมภูมิที่มีเลขคู่เดียวกัน อัตราส่วนรอบและความเหนี่ยวนำตั้งที่ขดปฐมภูมิ กระแสของขดนี้นับจากขา a ไปขา b ตอนจ่ายไฟให้โหลดจึงเป็นค่าลบ ใช้แอมมิเตอร์อนุกรมกับโหลดถ้าอยากอ่านกระแสโหลด',
+  fields:[['grp','เลขคู่ (ขดปฐมภูมิใช้เลขเดียวกัน)','',1,99],['Imax','พิกัดกระแส','A',0.001,1e4]]};
+const ORDER = ['dc','ac','res','bulb','sw','fuse','cap','ind','tp','ts','diode','led','vm','am','gnd'];
+const PALX = { tr:{name:'หม้อแปลง'} };   // palette-only entry: places a primary and a secondary coil together
+const palName = t => (T[t]||PALX[t]).name;
+const BOOM = { dc:'big', ac:'big', cap:'big', res:'big', bulb:'pop', led:'pop', diode:'pop', am:'pop', sw:'pop', ind:'pop', tp:'pop', ts:'pop', fuse:'melt' };
 
 let comps = [], wires = [], uid = 1, sel = null, t = 0, running = true, elMode = false, speed = 1;
 let dirty = true, topo = null, pendingPlace = null, placing = null, drag = null, hover = null;
@@ -42,8 +49,8 @@ const srcR = c => ideal ? RINT : c.r;
 const amR = () => ideal ? RAM : RAM_REAL;
 const vmR = () => ideal ? RVM : RVM_REAL;
 const dkey = c => (ideal && c.type==='diode') ? 'idiode' : c.type;
-const realOnly = k => k==='r' || /max$/.test(k);
-const shownFields = type => T[type].fields.filter(f => !(ideal && realOnly(f[0])));
+const realOnly = k => k==='r' || k==='k' || /max$/.test(k);
+const shownFields = type => T[type].fields.filter(f => !(ideal && (realOnly(f[0]) || (type==='tp' && f[0]==='L'))));
 const REAL_PRESETS = new Set(['boom','fuse','short']);
 let showLabels = true, showHeat = true, parts = [], flashes = [], shake = 0, energy = { sup:0, heat:0 }, events = [];
 
@@ -87,9 +94,9 @@ function addWire(ax,ay,bx,by,off){
   return n;
 }
 
-const PREFIX = { dc:'DC', ac:'AC', res:'R', bulb:'B', sw:'S', fuse:'F', cap:'C', ind:'L', diode:'D', led:'LED', vm:'VM', am:'AM' };
-const TAGC = { dc:'--copper', ac:'--copper', res:'--ink', bulb:'--ink', cap:'--ink', ind:'--ink', sw:'--muted', fuse:'--muted', diode:'--led', led:'--led', vm:'--accent', am:'--accent' };
-const lab = c => c.name || (PREFIX[c.type] + (c.num||''));
+const PREFIX = { dc:'DC', ac:'AC', res:'R', bulb:'B', sw:'S', fuse:'F', cap:'C', ind:'L', tp:'TP', ts:'TS', gnd:'GND', diode:'D', led:'LED', vm:'VM', am:'AM' };
+const TAGC = { dc:'--copper', ac:'--copper', res:'--ink', bulb:'--ink', cap:'--ink', ind:'--ink', tp:'--ink', ts:'--ink', gnd:'--muted', sw:'--muted', fuse:'--muted', diode:'--led', led:'--led', vm:'--accent', am:'--accent' };
+const lab = c => c.name || (PREFIX[c.type] + (c.type==='tp'||c.type==='ts' ? c.grp : (c.num||'')));
 function assignNum(c){ if (c.num) return; const used=new Set(comps.filter(x=>x!==c && x.type===c.type && x.num).map(x=>x.num)); let n=1; while (used.has(n)) n++; c.num=n; }
 function numberAll(){ for (const c of comps) assignNum(c); }
 function serialize(){
@@ -151,20 +158,28 @@ function build(){
   const uf = new Int32Array(N*N); for (let k=0;k<N*N;k++) uf[k]=k;
   const f = k => { while (uf[k]!==k){ uf[k]=uf[uf[k]]; k=uf[k]; } return k; };
   for (const w of wires){ if (w.broken||w.off) continue; const a=f(K(w.ax,w.ay)), b=f(K(w.bx,w.by)); if (a!==b) uf[a]=b; }
-  for (const c of comps){ c.ra=f(K(c.ax,c.ay)); c.rb=f(K(c.bx,c.by)); }
+  for (const c of comps){ c.ra=f(K(c.ax,c.ay)); c.rb=c.type==='gnd' ? c.ra : f(K(c.bx,c.by)); }   // a ground symbol only uses leg a
   const u2 = new Int32Array(N*N); for (let k=0;k<N*N;k++) u2[k]=k;
   const f2 = k => { while (u2[k]!==k){ u2[k]=u2[u2[k]]; k=u2[k]; } return k; };
   for (const c of comps){ const a=f2(c.ra), b=f2(c.rb); if (a!==b) u2[a]=b; }
-  const gnd = new Map();
+  const gnd = new Map(), extraG = new Set();
+  // explicit ground symbols decide the 0 V node of their circuit; more than one in the same circuit are all held at 0 V
+  for (const c of comps) if (c.type==='gnd' && !c.off && !c.broken){ const is=f2(c.ra); if (!gnd.has(is)) gnd.set(is,c.ra); else if (gnd.get(is)!==c.ra) extraG.add(c.ra); }
   for (const c of comps) if (c.type==='dc'||c.type==='ac'){ const is=f2(c.ra); if (!gnd.has(is)) gnd.set(is,c.ra); }
   for (const c of comps){ const is=f2(c.ra); if (!gnd.has(is)) gnd.set(is,c.ra); }
-  const gset = new Set(gnd.values()), idx = new Map(); let n=0;
+  const gset = new Set([...gnd.values(), ...extraG]), idx = new Map(); let n=0;
   for (const c of comps) for (const r of [c.ra,c.rb]) if (!idx.has(r)) idx.set(r, gset.has(r) ? -1 : n++);
+  // transformer coils pair up by grp; a live pair is stamped together in step()
+  const frees = comps.filter(c => c.type==='ts'), pairs = [];
+  for (const c of comps){ c.pt=null; c.live=false; c.ju=-1; }
+  for (const p of comps) if (p.type==='tp'){ const i=frees.findIndex(q => q.grp===p.grp); if (i>=0){ const q=frees.splice(i,1)[0]; p.pt=q; q.pt=p;
+    if (!p.off && !p.broken && !q.off && !q.broken){ p.live=q.live=true; pairs.push(p); } } }
+  const nn=n; if (ideal) pairs.forEach((p,k)=>{ p.ju=nn+k; }); const nt = nn + (ideal ? pairs.length : 0);
   // wire groups for per-segment current
   const groups = new Map();
   for (const w of wires){ if (w.broken||w.off){ w.i=0; continue; } const r=f(K(w.ax,w.ay)); if (!groups.has(r)) groups.set(r,{nodes:new Map(),ws:[]});
     const g=groups.get(r); g.ws.push(w); for (const k of [K(w.ax,w.ay),K(w.bx,w.by)]) if (!g.nodes.has(k)) g.nodes.set(k,g.nodes.size); }
-  topo = { n, idx, A:new Float64Array(n*n), b:new Float64Array(n), x:new Float64Array(n), groups, gset, find:f,
+  topo = { n:nt, nn, pairs, hasG:comps.some(c => c.type==='gnd'), idx, A:new Float64Array(nt*nt), b:new Float64Array(nt), x:new Float64Array(nt), groups, gset, find:f,
     nonlin: comps.some(c => c.type==='diode'||c.type==='led') };
   dirty = false;
 }
@@ -191,7 +206,9 @@ function gj(c){
     case 'vm': return [1/vmR(), 0];
     case 'sw': return [c.on ? 1/RAM : 1e-10, 0];
     case 'cap': { const G=c.C*1e-6/DT; return [G, -G*c.vp]; }
-    case 'ind': { const G=DT/c.L; return [G, c.ip]; }
+    case 'ind': case 'tp': { const G=DT/c.L; return [G, c.ip]; }   // a transformer coil without a partner is just an inductor
+    case 'ts': return [1e-10, 0];
+    case 'gnd': return [0, 0];
     case 'diode': case 'led': { const P=DP[dkey(c)], e=Math.exp(Math.min(c.vd/P.nvt, 80)), Id=P.Is*(e-1), Gd=P.Is/P.nvt*e+1e-12; return [Gd, Id-Gd*c.vd]; }
   }
   return [0,0];
@@ -205,16 +222,36 @@ function pnj(vn, vo, P){
 const NV = r => { const k=topo.idx.get(r); return k===undefined||k<0 ? 0 : topo.x[k]; };
 
 function step(){
-  const {n, idx, A, b, x} = topo;
+  const {n, nn, idx, A, b, x, pairs} = topo;
+  const add = (i,j,g) => { if (i>=0 && j>=0) A[i*n+j]+=g; };
+  const kc = p => Math.min(0.9999, Math.max(0.5, p.k));
+  // coupled coils: i1 = ip1 + DT(Γ11 v1 + Γ12 v2), i2 = ip2 + DT(Γ12 v1 + Γ22 v2), Γ = inverse inductance matrix, L2 = n²·L1, M = k·n·L1
+  const gam = p => { const q=1-kc(p)**2, L1=p.L, nr=p.n; return [DT/(L1*q), -DT*kc(p)/(nr*L1*q), DT/(nr*nr*L1*q)]; };
+  function stampPair(p){
+    const q=p.pt, ia=idx.get(p.ra), ib=idx.get(p.rb), ic=idx.get(q.ra), id=idx.get(q.rb);
+    if (ideal){   // ideal transformer: V(c)-V(d) = n(V(a)-V(b)), I1 = -n·I2, one extra unknown I2 at row ju
+      const J=p.ju, nr=p.n;
+      add(ia,J,-nr); add(ib,J,nr); add(ic,J,1); add(id,J,-1);
+      add(J,ic,1); add(J,id,-1); add(J,ia,-nr); add(J,ib,nr);
+      return;
+    }
+    const [g11,g12,g22]=gam(p), pt=[[ia,ib],[ic,id]], G=[[g11,g12],[g12,g22]], ip=[p.ip,q.ip];
+    for (let u=0;u<2;u++){
+      const [pu,mu]=pt[u]; if (pu>=0) b[pu]-=ip[u]; if (mu>=0) b[mu]+=ip[u];
+      for (let w=0;w<2;w++){ const g=G[u][w], [pw,mw]=pt[w]; add(pu,pw,g); add(pu,mw,-g); add(mu,pw,-g); add(mu,mw,g); }
+    }
+  }
   if (n>0){
     for (let it=0; it<60; it++){
-      A.fill(0); b.fill(0); for (let k=0;k<n;k++) A[k*n+k]=GMIN;
+      A.fill(0); b.fill(0); for (let k=0;k<nn;k++) A[k*n+k]=GMIN;
       for (const c of comps){
+        if (c.live) continue;
         const [g,j]=gj(c), ia=idx.get(c.ra), ib=idx.get(c.rb);
         if (ia>=0){ A[ia*n+ia]+=g; b[ia]-=j; }
         if (ib>=0){ A[ib*n+ib]+=g; b[ib]+=j; }
         if (ia>=0 && ib>=0){ A[ia*n+ib]-=g; A[ib*n+ia]-=g; }
       }
+      for (const p of pairs) stampPair(p);
       solve(A,b,n,x);
       if (!topo.nonlin) break;
       let conv=true;
@@ -225,16 +262,21 @@ function step(){
       if (conv) break;
     }
   }
+  for (const p of pairs){
+    const q=p.pt, v1=NV(p.ra)-NV(p.rb), v2=NV(q.ra)-NV(q.rb);
+    if (ideal){ const J=x[p.ju]; p.i=-p.n*J; q.i=J; }
+    else { const [g11,g12,g22]=gam(p); p.i=p.ip+g11*v1+g12*v2; q.i=q.ip+g12*v1+g22*v2; }
+  }
   for (const c of comps){
-    const v = n>0 ? NV(c.ra)-NV(c.rb) : 0, [g,j] = gj(c);
-    c.v=v; c.i = n>0 ? g*v+j : 0;
+    const v = n>0 ? NV(c.ra)-NV(c.rb) : 0;
+    if (c.live){ c.v=v; } else { const [g,j] = gj(c); c.v=v; c.i = n>0 || topo.hasG ? g*v+j : 0; }
     if (c.type==='cap') c.vp=v;
-    if (c.type==='ind') c.ip=c.i;
+    if (c.type==='ind' || c.type==='tp' || c.type==='ts') c.ip=c.i;
     // energy bookkeeping
     if (c.type==='dc'||c.type==='ac'){
       const emf = c.broken ? 0 : (c.type==='dc' ? c.E : c.E*Math.sin(2*Math.PI*c.f*t));
       c.pNow = emf*c.i; energy.sup += emf*c.i*DT; energy.heat += (emf*c.i + v*c.i)*DT; c.en += emf*c.i*DT;
-    } else if (c.type==='cap'||c.type==='ind'){ c.en += v*c.i*DT; }
+    } else if (c.type==='cap'||c.type==='ind'||c.type==='tp'||c.type==='ts'){ c.en += v*c.i*DT; }
     else { energy.heat += v*c.i*DT; c.en += Math.abs(v*c.i)*DT; }
     // heating
     if (ideal){ c.temp=TA; c.pHeat=0; c.pMax=1e9; continue; }
@@ -242,6 +284,11 @@ function step(){
     c.pHeat = ph; c.pMax = pmax;
     c.temp = Math.min(3000, c.temp + (ph - (c.temp-TA)/Rth)/Cth*DT);
     if (!c.broken && c.temp>=TFAIL && pmax<1e8){ c.broken=true; c.vd=0; c.failMsg=failText(c,ph,pmax); events.push(c); }
+  }
+  if (topo.hasG){   // current that flows from each grounded net into earth, so wire currents stay balanced
+    const out=new Map(), cnt=new Map();
+    for (const c of comps) if (c.type!=='gnd'){ out.set(c.ra,(out.get(c.ra)||0)+c.i); out.set(c.rb,(out.get(c.rb)||0)-c.i); } else cnt.set(c.ra,(cnt.get(c.ra)||0)+1);
+    for (const c of comps) if (c.type==='gnd'){ const i=-(out.get(c.ra)||0)/cnt.get(c.ra); c.i = c.off||c.broken||Math.abs(i)<1e-7 ? 0 : i; }   // below 100 nA is just the GMIN leak
   }
   t += DT;
 }
@@ -253,7 +300,7 @@ function thermal(c){
     case 'am': return [c.i*c.i*amR(), c.Pmax, 0.5];
     case 'diode': case 'led': return [Math.abs(c.v*c.i), c.Pmax, 0.8];
     case 'cap': return [Math.max(0,Math.abs(c.v)-c.Vmax)*2, 1, 0.5];
-    case 'ind': return [c.i*c.i, c.Imax*c.Imax, 2];
+    case 'ind': case 'tp': case 'ts': return [c.i*c.i, c.Imax*c.Imax, 2];
     case 'fuse': return [c.i*c.i*RF, c.Imax*c.Imax*RF, 0.25];
   }
   return [0, 1e9, 1];
@@ -262,7 +309,7 @@ function failText(c, ph, pmax){
   const nm=T[c.type].name, at=` (t = ${t.toFixed(2)} s)`;
   if (c.type==='fuse') return `ฟิวส์ขาด กระแส ${fmt(Math.abs(c.i),'A')} เกินพิกัด ${fmt(c.Imax,'A')} ช่วยตัดวงจรไว้ทัน`+at;
   if (c.type==='cap') return `${nm}ระเบิด แรงดัน ${fmt(Math.abs(c.v),'V')} เกินพิกัด ${fmt(c.Vmax,'V')}`+at;
-  if (c.type==='ind') return `${nm}ไหม้ กระแส ${fmt(Math.abs(c.i),'A')} เกินพิกัด ${fmt(c.Imax,'A')}`+at;
+  if (c.type==='ind'||c.type==='tp'||c.type==='ts') return `${nm}ไหม้ กระแส ${fmt(Math.abs(c.i),'A')} เกินพิกัด ${fmt(c.Imax,'A')}`+at;
   if (c.type==='dc'||c.type==='ac') return `${nm}ระเบิด ความร้อนภายใน ${fmt(ph,'W')} จากกระแส ${fmt(Math.abs(c.i),'A')} (ลัดวงจร)`+at;
   if (c.type==='bulb') return `ไส้หลอดขาด กำลัง ${fmt(ph,'W')} เกินพิกัด ${fmt(pmax,'W')}`+at;
   return `${nm}ไหม้ กำลัง ${fmt(ph,'W')} เกินพิกัด ${fmt(pmax,'W')}`+at;
@@ -270,7 +317,7 @@ function failText(c, ph, pmax){
 
 function wireCurrents(){
   const s = new Map();
-  for (const c of comps){ const ka=K(c.ax,c.ay), kb=K(c.bx,c.by); s.set(ka,(s.get(ka)||0)-c.i); s.set(kb,(s.get(kb)||0)+c.i); }
+  for (const c of comps){ const ka=K(c.ax,c.ay), kb=K(c.bx,c.by); s.set(ka,(s.get(ka)||0)-c.i); if (c.type!=='gnd') s.set(kb,(s.get(kb)||0)+c.i); }
   for (const g of topo.groups.values()){
     const m=g.nodes.size; if (m<2){ g.ws.forEach(w=>w.i=0); continue; }
     const n=m-1, A=new Float64Array(n*n), b=new Float64Array(n), x=new Float64Array(n);
@@ -319,6 +366,12 @@ function drawSymbol(x, c, uu, Cc, ang){
     case 'sw': ln(0,0,.6*uu,0); ln(1.4*uu,0,L,0);
       x.beginPath(); x.arc(.6*uu,0,.08*uu,0,7); x.fill(); x.beginPath(); x.arc(1.4*uu,0,.08*uu,0,7); x.fill();
       if (c.on) ln(.6*uu,0,1.4*uu,-.06*uu); else ln(.6*uu,0,1.3*uu,-.5*uu); break;
+    case 'gnd': ln(0,0,.9*uu,0); ln(.9*uu,-.5*uu,.9*uu,.5*uu); ln(1.2*uu,-.32*uu,1.2*uu,.32*uu); ln(1.5*uu,-.14*uu,1.5*uu,.14*uu); break;
+    case 'tp': case 'ts': { const dn=c.type==='ts';   // coil bumps away from its partner, iron-core lines on the side facing it, dot on leg a
+      ln(0,0,.5*uu,0); ln(1.5*uu,0,L,0); x.beginPath(); x.moveTo(.5*uu,0);
+      for (let k=0;k<4;k++) x.arc(.5*uu+(k+.5)*.25*uu,0,.125*uu,Math.PI,0,dn);
+      x.stroke(); const cy=(dn?-1:1)*.44*uu; ln(.42*uu,cy,1.58*uu,cy);
+      x.beginPath(); x.arc(.22*uu,(dn?.22:-.22)*uu,.07*uu,0,7); x.fill(); break; }
     case 'fuse': ln(0,0,.55*uu,0); ln(1.45*uu,0,L,0); x.strokeRect(.55*uu,-.2*uu,.9*uu,.4*uu);
       if (c.broken){ ln(.55*uu,0,.82*uu,0); ln(1.18*uu,0,1.45*uu,0); x.beginPath(); x.arc(.84*uu,0,.06*uu,0,7); x.arc(1.16*uu,0,.06*uu,0,7); x.fill(); }
       else ln(.55*uu,0,1.45*uu,0); break;
@@ -367,11 +420,11 @@ function labelText(c){
   let v='';
   switch (c.type){
     case 'dc': v=fmt(c.E,'V'); break; case 'ac': v=fmt(c.E,'V')+' '+fmt(c.f,'Hz'); break;
-    case 'res': case 'bulb': v=fmt(c.R,'Ω'); break; case 'cap': v=fmt(c.C*1e-6,'F'); break; case 'ind': v=fmt(c.L,'H'); break;
+    case 'res': case 'bulb': v=fmt(c.R,'Ω'); break; case 'cap': v=fmt(c.C*1e-6,'F'); break; case 'ind': v=fmt(c.L,'H'); break; case 'tp': v='1:'+(+c.n.toPrecision(3)); break;
     case 'fuse': v=fmt(c.Imax,'A'); break; case 'sw': v=c.on?'ต่อ':'ตัด'; break;
     case 'vm': v=fmt(c.v,'V'); break; case 'am': v=fmt(c.i,'A'); break;
   }
-  return lab(c) + (v?' '+v:'') + (c.broken?' ไหม้':'') + (c.off?' (พัก)':'');
+  return lab(c) + (v?' '+v:'') + (c.broken?' ไหม้':'') + (c.off?' (พัก)':'') + ((c.type==='tp'||c.type==='ts') && !c.pt ? ' (ไม่มีคู่)' : '');
 }
 const heatF = T0 => Math.max(0, Math.min(1, (T0-TA)/(TFAIL-TA)));
 function draw(){
@@ -384,7 +437,7 @@ function draw(){
 
   const deg = new Map(); const bump=k=>deg.set(k,(deg.get(k)||0)+1);
   for (const w of wires){ bump(K(w.ax,w.ay)); bump(K(w.bx,w.by)); }
-  for (const c of comps){ bump(K(c.ax,c.ay)); bump(K(c.bx,c.by)); }
+  for (const c of comps){ bump(K(c.ax,c.ay)); if (c.type!=='gnd') bump(K(c.bx,c.by)); }
 
   if (sel){ ctx.save(); ctx.strokeStyle=C.accent; ctx.globalAlpha=0.16; ctx.lineCap='round'; ctx.lineWidth=sel.w?u*0.42:u*1.0;
     ctx.beginPath(); ctx.moveTo(P(sel.ax),P(sel.ay)); ctx.lineTo(P(sel.bx),P(sel.by)); ctx.stroke();
@@ -432,15 +485,18 @@ function draw(){
 
   const dc = elMode ? C.el : C.copper;
   for (const w of wires) dots(w, dc);
-  for (const c of comps) if (c.type!=='vm') dots(c, dc);
+  for (const c of comps) if (c.type!=='vm' && c.type!=='gnd') dots(c, dc);
 
   for (const c of comps){
     const mx=(P(c.ax)+P(c.bx))/2, my=(P(c.ay)+P(c.by))/2, hz=c.ay===c.by;
     let txt=null;
-    if (showLabels) txt=labelText(c);
+    if (c.type==='gnd') txt=null;
+    else if (showLabels) txt=labelText(c);
     else if (c.type==='vm') txt=fmt(c.v,'V'); else if (c.type==='am') txt=fmt(c.i,'A');
-    if (txt){ if (hz) pill(txt, mx, my-u*0.95); else pill(txt, mx+u*0.62, my, 'l'); }
-    if (showHeat && c.temp>60 && !c.broken){ const tt=Math.round(c.temp)+' °C'; if (hz) pill(tt, mx, my+u*0.95); else pill(tt, mx-u*0.62, my, 'r'); }
+    // labels sit on the default side (above / right) unless a transformer partner is there; then they go to the far side
+    let sg=1; if (c.pt){ const dm = hz ? (c.pt.ay+c.pt.by-c.ay-c.by)/2 : (c.pt.ax+c.pt.bx-c.ax-c.bx)/2; if (dm) sg = (hz ? dm>0 : dm<0) ? 1 : -1; }
+    if (txt){ if (hz) pill(txt, mx, my-sg*u*0.95); else pill(txt, mx+sg*u*0.62, my, sg>0?'l':'r'); }
+    if (showHeat && c.temp>60 && !c.broken){ const tt=Math.round(c.temp)+' °C'; if (hz) pill(tt, mx, my+sg*u*0.95); else pill(tt, mx-sg*u*0.62, my, sg>0?'r':'l'); }
   }
 
   if (tool==='rotate' && lastG && !drag){
@@ -470,8 +526,9 @@ function draw(){
     ctx.fillStyle=C.accent; ctx.beginPath(); ctx.arc(P(drag.to.x),P(drag.to.y),u*0.17,0,7); ctx.fill();
   }
   if (placing && placing.g){
-    const g=placing.g, gc={type:placing.type,glow:0,on:true,ax:g.x-1,ay:g.y,bx:g.x+1,by:g.y}; clampC(gc);
-    ctx.save(); ctx.globalAlpha=0.55; ctx.translate(P(gc.ax),P(gc.ay)); drawSymbol(ctx,gc,u,C,0); ctx.restore();
+    const g=placing.g, kinds=placing.type==='tr' ? ['tp','ts'] : [placing.type], gy=placing.type==='tr' ? Math.min(g.y,N-2) : g.y;
+    kinds.forEach((ty,k) => { const gc={type:ty,glow:0,on:true,ax:g.x-1,ay:gy+k,bx:g.x+1,by:gy+k}; clampC(gc);
+      ctx.save(); ctx.globalAlpha=0.55; ctx.translate(P(gc.ax),P(gc.ay)); drawSymbol(ctx,gc,u,C,0); ctx.restore(); });
   }
   if (hover && !drag){ const pz=reduce?0:Math.sin(now/220)*0.05; ctx.save(); ctx.strokeStyle=C.accent; ctx.shadowColor=C.accent; ctx.shadowBlur=glow(10); ctx.lineWidth=1.6;
     ctx.beginPath(); ctx.arc(P(hover.x),P(hover.y),u*(0.24+pz),0,7); ctx.stroke(); ctx.restore(); }
@@ -525,6 +582,7 @@ const SHARDS = {
   fuse: [['shard','glass',8],['drop','copper',10]],
   wire: [['drop','copper',8]],
 };
+SHARDS.tp = SHARDS.ts = SHARDS.ind;
 const ARCY = new Set(['dc','ac','cap','ind','sw']);   // parts that throw electric arcs
 const FLASHC = { led:'led', bulb:'glow', fuse:'copper', wire:'copper' };
 const matCol = (m, R) => m==='band' ? BANDS[Math.floor(R()*BANDS.length)] : C[m] || MAT[m];
@@ -679,9 +737,9 @@ function handleEvents(){
 
 /* ---------- palette ---------- */
 const pal = $('#palette');
-for (const type of ORDER){
-  const b=document.createElement('button'); b.className='pal'; b.dataset.type=type; b.setAttribute('aria-pressed','false'); b.setAttribute('aria-label',T[type].name);
-  b.innerHTML=`<canvas width="96" height="52"></canvas><span>${T[type].name}</span>`; pal.appendChild(b);
+for (const type of ORDER.filter(t => t!=='ts').map(t => t==='tp' ? 'tr' : t)){
+  const b=document.createElement('button'); b.className='pal'; b.dataset.type=type; b.setAttribute('aria-pressed','false'); b.setAttribute('aria-label',palName(type));
+  b.innerHTML=`<canvas width="96" height="52"></canvas><span>${palName(type)}</span>`; pal.appendChild(b);
   b.addEventListener('pointerdown', e => { e.preventDefault(); b.setPointerCapture(e.pointerId); placing={type,sx:e.clientX,sy:e.clientY,moved:false,g:null}; });
   b.addEventListener('pointermove', e => { if (!placing) return;
     if (Math.hypot(e.clientX-placing.sx,e.clientY-placing.sy)>6) placing.moved=true;
@@ -695,8 +753,10 @@ for (const type of ORDER){
 }
 function drawIcons(){
   pal.querySelectorAll('.pal').forEach(b => { const c=b.querySelector('canvas'), x=c.getContext('2d');
-    x.setTransform(2,0,0,2,0,0); x.clearRect(0,0,48,26); x.translate(3,13);
-    drawSymbol(x,{type:b.dataset.type,glow:0,on:true},21,Object.assign({},C,{bg:C.panel}),0); });
+    x.setTransform(2,0,0,2,0,0); x.clearRect(0,0,48,26);
+    const cc=Object.assign({},C,{bg:C.panel});
+    if (b.dataset.type==='tr'){ x.translate(10,6); drawSymbol(x,{type:'tp',glow:0,on:true},14,cc,0); x.translate(0,13); drawSymbol(x,{type:'ts',glow:0,on:true},14,cc,0); return; }
+    x.translate(3,13); drawSymbol(x,{type:b.dataset.type,glow:0,on:true},21,cc,0); });
 }
 function markPal(){ pal.querySelectorAll('.pal').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.type===pendingPlace))); updateStatusHint(); }
 
@@ -714,6 +774,11 @@ const hitComp = g => { for (let k=comps.length-1;k>=0;k--) if (segHit(comps[k],g
 const hitWire = g => { for (let k=wires.length-1;k>=0;k--) if (segHit(wires[k],g,0,1,0.28)) return wires[k]; return null; };
 
 function place(type, g){
+  if (type==='tr'){   // a transformer is a primary and a secondary coil one row apart, paired by grp
+    const y=Math.min(g.y,N-2), used=new Set(comps.filter(c=>c.type==='tp'||c.type==='ts').map(c=>c.grp)); let grp=1; while (used.has(grp)) grp++;
+    const p=mk('tp',g.x-1,y,g.x+1,y,{grp}), q=mk('ts',g.x-1,y+1,g.x+1,y+1,{grp}); clampC(p); q.ax=p.ax; q.bx=p.bx;
+    comps.push(p,q); dirty=true; select(p); save(); return;
+  }
   const c=mk(type,g.x-1,g.y,g.x+1,g.y); clampC(c); comps.push(c); assignNum(c); dirty=true; select(c); save();
 }
 cv.addEventListener('pointerdown', e => {
@@ -970,12 +1035,14 @@ function updateList(){
   }
 }
 function updateStatusHint(){
-  status.textContent = pendingPlace ? `แตะจุดบนแผงเพื่อวาง${T[pendingPlace].name} · แตะ${T[pendingPlace].name}อีกครั้งหรือกด Esc เพื่อยกเลิก` : (toast && performance.now()<toast.until ? toast.text : TOOL_HINT[tool]);
+  status.textContent = pendingPlace ? `แตะจุดบนแผงเพื่อวาง${palName(pendingPlace)} · แตะ${palName(pendingPlace)}อีกครั้งหรือกด Esc เพื่อยกเลิก` : (toast && performance.now()<toast.until ? toast.text : TOOL_HINT[tool]);
   updateVars();
 }
 function updateEnergy(){
   let sto=0, pn=0;
-  for (const c of comps){ if (c.type==='cap') sto+=0.5*c.C*1e-6*c.v*c.v; if (c.type==='ind') sto+=0.5*c.L*c.i*c.i; if (c.pNow && (c.type==='dc'||c.type==='ac')) pn+=c.pNow; }
+  for (const c of comps){ if (c.type==='cap') sto+=0.5*c.C*1e-6*c.v*c.v; if (c.type==='ind') sto+=0.5*c.L*c.i*c.i;
+    if (c.type==='tp'){ if (c.live && !ideal){ const q=c.pt, kk=Math.min(0.9999,Math.max(0.5,c.k)); sto+=0.5*c.L*(c.i*c.i + 2*kk*c.n*c.i*q.i + c.n*c.n*q.i*q.i); } else if (!c.live) sto+=0.5*c.L*c.i*c.i; }
+    if (c.pNow && (c.type==='dc'||c.type==='ac')) pn+=c.pNow; }
   $('#eSup').textContent=fmt(energy.sup,'J'); $('#eHeat').textContent=fmt(energy.heat,'J'); $('#eSto').textContent=fmt(sto,'J'); $('#pNow').textContent=fmt(pn,'W');
   const tot=Math.max(1e-12, energy.heat+sto);
   $('#bHeat').style.width=(Math.max(0,energy.heat)/tot*100).toFixed(1)+'%'; $('#bSto').style.width=(sto/tot*100).toFixed(1)+'%';
@@ -1031,7 +1098,7 @@ document.addEventListener('input', e=>{
   const c=comps.find(x=>x.id==el.dataset.cid); if (!c) return;
   const f=T[c.type].fields.find(x=>x[0]===el.dataset.k); if (!f) return;
   const v=parseFloat(el.value);
-  if (isFinite(v) && v>=f[3] && v<=f[4]){ c[f[0]]=v; el.removeAttribute('aria-invalid'); save();
+  if (isFinite(v) && v>=f[3] && v<=f[4]){ c[f[0]]= f[0]==='grp' ? Math.round(v) : v; if (f[0]==='grp') dirty=true; el.removeAttribute('aria-invalid'); save();
     document.querySelectorAll(`input[data-cid="${c.id}"][data-k="${f[0]}"]`).forEach(o=>{ if (o!==el) o.value=el.value; }); }
   else el.setAttribute('aria-invalid','true');
 });
@@ -1065,7 +1132,7 @@ $('#sSave').onclick=()=>{
   if (getSaves().some(x=>x.name===name)) askConfirm(`มีวงจรชื่อ "${name}" อยู่แล้ว บันทึกทับใช่ไหม`, 'บันทึกทับ', doSave); else doSave();
 };
 /* ---------- circuit code (text netlist) ---------- */
-const CODE_T = { DC:'dc', AC:'ac', R:'res', B:'bulb', S:'sw', F:'fuse', C:'cap', L:'ind', D:'diode', LED:'led', VM:'vm', AM:'am' };
+const CODE_T = { DC:'dc', AC:'ac', R:'res', B:'bulb', S:'sw', F:'fuse', C:'cap', L:'ind', TP:'tp', TS:'ts', GND:'gnd', D:'diode', LED:'led', VM:'vm', AM:'am' };
 const TYPE_CODE = Object.fromEntries(Object.entries(CODE_T).map(([k,v])=>[v,k]));
 function parseCode(txt){
   const errs=[], cs=[], ws=[]; let idealOpt=true, title='';
@@ -1101,7 +1168,7 @@ function parseCode(txt){
       if (!f){ errs.push(`บรรทัด ${n}: ${head} ไม่มีค่า "${k}" ใช้ได้: ${T[type].fields.map(x=>x[0]).concat(type==='sw'?['on']:[], ['name','off']).join(', ')}`); continue; }
       const v=Number(kv[k]);
       if (!isFinite(v) || v<f[3] || v>f[4]){ errs.push(`บรรทัด ${n}: ${k}=${kv[k]} ต้องเป็นตัวเลขระหว่าง ${f[3]} ถึง ${f[4]} (${f[2]})`); continue; }
-      o[k]=v;
+      o[k]= k==='grp' ? Math.round(v) : v;
     }
     cs.push(o);
   });
@@ -1183,11 +1250,16 @@ S   switch: on=1 closed or on=0 open [1], Pmax [10]
 F   fuse: Imax A [2]
 C   capacitor: C in MICROFARADS [4700], Vmax V [25]   (0.05 F -> C=50000, 100 uF -> C=100)
 L   inductor: L henry [2], Imax A [2]
+TP  transformer primary coil: grp pair number [1], L primary henry [100], n turns ratio N2/N1 [2], k coupling [0.99], Imax A [2]
+TS  transformer secondary coil: grp [1], Imax A [2]. A TP and a TS with the same grp form one transformer; n, L, k are set on the TP only.
+    Dots are at leg a of both coils: V(c)-V(d) follows n*(V(a)-V(b)) in phase. Works with AC only (a DC source makes the current ramp up).
+    With ideal=1 it is an ideal transformer (V2 = n*V1, I1 = -n*I2, L and k ignored); with ideal=0 it is two coupled coils.
+GND ground symbol: leg a connects to the net that must be 0 V, leg b is only part of the drawing and must stay unconnected. Optional; without it the board picks a reference itself.
 D   diode: conducts from a (anode) to b (cathode), Pmax [1]
 LED conducts from a to b, about 2 V drop, Pmax [0.1]
 VM  voltmeter, reads V(a)-V(b), connect in PARALLEL
 AM  ammeter, reads current from a to b, connect in SERIES, Pmax [2]
-r, Pmax, Imax and Vmax only matter with ideal=0; set them well above the expected values unless the problem wants a part to fail.
+r, k, Pmax, Imax and Vmax only matter with ideal=0; set them well above the expected values unless the problem wants a part to fail.
 
 WIRE RULES (most important)
 1. A wire connects to EVERY grid point it passes through, not only its ends.
@@ -1195,6 +1267,7 @@ WIRE RULES (most important)
 3. A wire passing a component leg connects to that leg.
 4. Never run a wire through a component's middle point, and never wire a component's a leg straight to its b leg (that shorts it).
 5. Use only horizontal and vertical wire segments. Parts must not overlap.
+6. Transformer: put TP and TS in parallel rows, TP above (e.g. TP 7,5 9,5 and TS 7,6 9,6; adjacent rows draw the standard symbol). Their legs are neighbours, so never run a wire through both leg a points (7,5 and 7,6) or both leg b points: send the primary wires up and the secondary wires down.
 
 LAYOUT TIPS
 Put the source on the left, vertical (e.g. "DC 2,11 2,9" with + at the top), make a top rail (y=3) and a bottom rail (y=15),
@@ -1219,7 +1292,7 @@ W   12,10 12,15
 CHECK BEFORE ANSWERING: TITLE present; every point 0-19; every part has legs exactly 2 apart; no wire through a part's middle;
 crossings are meant to connect; DC polarity (b = +) and diode direction (a -> b) are right; every branch returns to the source;
 C is in microfarads and AC E is peak; no units after numbers.
-If the problem needs something the board lacks (transformer, transistor, op-amp, current source, variable resistor), say so and use the closest substitute.`;
+If the problem needs something the board lacks (transistor, op-amp, current source, variable resistor), say so and use the closest substitute.`;
 $('#cPrompt').value=AI_PROMPT;
 const codePanel=$('#codePanel');
 function openCode(){ codePanel.hidden=false; $('#codeBtn').setAttribute('aria-expanded','true'); cMsg(''); showErrs([]); if (!matchMedia('(pointer: coarse)').matches) $('#cCode').focus(); }
