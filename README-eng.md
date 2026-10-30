@@ -80,6 +80,10 @@ Key rules to remember:
 
 There are no variable resistors, transformers, transistors, op-amps or current sources yet. The speed of the dots moving along wires is scaled so you can see it, and is not the real drift speed of electrons.
 
+## Version
+
+The version number lives in `version.txt` and is shown at the bottom of the page; the change history is in `log.txt` (click the version on the page to open it).
+
 ## Tech
 
 Plain HTML, CSS and JavaScript split into `index.html` (page structure), `style.css` (styles) and `app.js` (program), with no build step and no external libraries (apart from Google Fonts). The circuit solver uses Modified Nodal Analysis, backward Euler companion models for capacitors and inductors, and Newton-Raphson iteration for diodes and LEDs. The interface is in Thai.
