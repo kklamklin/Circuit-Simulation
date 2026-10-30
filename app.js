@@ -1338,8 +1338,9 @@ $('#speed').onchange=e=>{ speed=parseFloat(e.target.value); };
 const setMode=m=>{ elMode=m; $('#mCur').setAttribute('aria-pressed',String(!m)); $('#mEl').setAttribute('aria-pressed',String(m)); };
 $('#mCur').onclick=()=>setMode(false); $('#mEl').onclick=()=>setMode(true);
 
-// version number lives in version.txt (history in log.txt); hidden when the file cannot be fetched, e.g. opened from disk
-try { if (location.protocol!=='file:') fetch('version.txt',{cache:'no-store'}).then(r=>r.ok?r.text():Promise.reject()).then(t=>{ const v=t.trim(); if (!/^\d+$/.test(v)) return; const a=$('#ver'); a.textContent='เวอร์ชัน '+v; a.parentElement.hidden=false; }).catch(()=>{}); } catch(e){}
+// the version is written here and in the name of the version file ("version 1.0.2.0.txt"); change both together
+const VERSION = '1.0.2.0';
+{ const a=$('#ver'); a.textContent='เวอร์ชัน '+VERSION; a.href=encodeURI('version '+VERSION+'.txt'); a.parentElement.hidden=false; }
 
 /* ---------- sizing + loop ---------- */
 const stage=$('#stage'), compact=matchMedia('(max-width:1060px)');

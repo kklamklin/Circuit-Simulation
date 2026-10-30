@@ -84,7 +84,7 @@ There are no variable resistors, transistors, op-amps or current sources yet. Th
 
 ## Version
 
-The version number lives in `version.txt` and is shown at the bottom of the page; the change history is in `log.txt` (click the version on the page to open it).
+The version number has four parts, `major.medium.minor.patch`, for example `1.0.2.0` (major = a new system or more than 5 new sub-systems, medium = 2–5 new sub-systems, minor = exactly 1 new sub-system, patch = style, text or other small changes) and is shown at the bottom of the page. The change log is a file named after the version, for example `version 1.0.2.0.txt` (click the version on the page to open it).
 
 ## Tech
 
