@@ -45,7 +45,7 @@ const dkey = c => (ideal && c.type==='diode') ? 'idiode' : c.type;
 const realOnly = k => k==='r' || /max$/.test(k);
 const shownFields = type => T[type].fields.filter(f => !(ideal && realOnly(f[0])));
 const REAL_PRESETS = new Set(['boom','fuse','short']);
-let showLabels = true, showHeat = true, parts = [], flashes = [], shake = 0, energy = { sup:0, heat:0 }, events = [];
+let showLabels = true, showHeat = true, depth = false, parts = [], flashes = [], shake = 0, energy = { sup:0, heat:0 }, events = [];
 
 const $ = s => document.querySelector(s);
 const cv = $('#board'), ctx = cv.getContext('2d');
@@ -358,6 +358,7 @@ function pill(text, x, y, al='c', strong=false){
   const w=ctx.measureText(text).width+10, h=Math.max(16,u*0.58);
   const x0 = al==='l' ? x : al==='r' ? x-w : x-w/2;
   let px=Math.min(Math.max(x0,2),side-w-2), py=Math.min(Math.max(y-h/2,2),side-h-2);
+  if (depth){ ctx.save(); ctx.globalAlpha=0.4; ctx.fillStyle='#000'; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(px+2,py+3,w,h,5) : ctx.rect(px+2,py+3,w,h); ctx.fill(); ctx.restore(); }
   ctx.fillStyle=C.panel; ctx.strokeStyle=C.line; ctx.lineWidth=1;
   ctx.beginPath(); ctx.roundRect ? ctx.roundRect(px,py,w,h,5) : ctx.rect(px,py,w,h); ctx.fill(); ctx.stroke();
   ctx.fillStyle=C.ink; ctx.textAlign='left'; ctx.textBaseline='middle'; ctx.fillText(text,px+5,py+h/2+0.5);
@@ -372,6 +373,27 @@ function labelText(c){
     case 'vm': v=fmt(c.v,'V'); break; case 'am': v=fmt(c.i,'A'); break;
   }
   return lab(c) + (v?' '+v:'') + (c.broken?' ไหม้':'') + (c.off?' (พัก)':'');
+}
+// 2.5D view: each part is a small raised block with its symbol on top, lit from the top left, casting a shadow down-right.
+// It only changes how parts are painted; positions and hit-testing stay on the flat grid.
+const RAISE = { top:'#12291F', side:'#081A13', ink:'#73857D' };
+function drawRaised(c, ang){
+  const lifted = drag && drag.mode==='move' && drag.c===c, h=u*(lifted?0.42:0.22), steps=lite?2:5;
+  const at=(dx,dy,fn)=>{ ctx.save(); ctx.translate(P(c.ax)+dx,P(c.ay)+dy); ctx.rotate(ang); if (c.off) ctx.globalAlpha*=0.35; fn(); ctx.restore(); };
+  const plate=(x,fill)=>{ x.fillStyle=fill; x.beginPath(); x.roundRect ? x.roundRect(u*0.32,-u*0.46,u*1.36,u*0.92,u*0.14) : x.rect(u*0.32,-u*0.46,u*1.36,u*0.92); x.fill(); };
+  const dark=Object.assign({},C,{ink:RAISE.ink,bg:RAISE.side,glow:RAISE.side,led:RAISE.side}), dc={...c,glow:0};
+  // shadow on the board: a soft wide pass and a sharper one
+  at(h*1.2,h*1.5,()=>{ ctx.globalAlpha*=0.22; plate(ctx,'#000'); });
+  at(h*0.7,h*0.9,()=>{ ctx.globalAlpha*=0.5; plate(ctx,'#000'); });
+  // side walls: the block and its legs stacked from board level up to the top face
+  for (let k=0;k<steps;k++){ const f=k/steps;
+    at(-h*0.35*f,-h*f,()=>{ plate(ctx,RAISE.side); drawSymbol(ctx,dc,u,dark,ang); }); }
+  // top face
+  at(-h*0.35,-h,()=>{
+    plate(ctx,RAISE.top);
+    ctx.save(); ctx.globalAlpha*=0.22; ctx.strokeStyle=C.silk; ctx.lineWidth=1; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(u*0.32,-u*0.46,u*1.36,u*0.92,u*0.14) : ctx.rect(u*0.32,-u*0.46,u*1.36,u*0.92); ctx.stroke(); ctx.restore();
+    if (!c.off){ ctx.shadowColor='rgba(216,232,225,.45)'; ctx.shadowBlur=glow(u*0.25); }
+    drawSymbol(ctx,c,u,Object.assign({},C,{ink:C.silk}),ang); });
 }
 const heatF = T0 => Math.max(0, Math.min(1, (T0-TA)/(TFAIL-TA)));
 function draw(){
@@ -422,6 +444,7 @@ function draw(){
 
   for (const c of comps){
     const ang=Math.atan2(c.by-c.ay, c.bx-c.ax);
+    if (depth){ drawRaised(c, ang); continue; }
     ctx.save(); ctx.translate(P(c.ax),P(c.ay)); ctx.rotate(ang);
     ctx.fillStyle=C.bg; ctx.fillRect(u*0.3,-u*0.5,u*1.4,u);
     if (c.off){ ctx.globalAlpha=0.35; } else { ctx.shadowColor='rgba(216,232,225,.45)'; ctx.shadowBlur=glow(u*0.25); }
@@ -1282,9 +1305,14 @@ try { document.fonts.ready.then(resize); } catch(e){}
 // palette beside the board can be folded away on small screens; the choice is remembered in this browser
 const app=$('.app'), palBtn=$('#palBtn');
 function setPal(open){ app.classList.toggle('palhide', !open); palBtn.setAttribute('aria-expanded', String(open)); }
-try { setPal(JSON.parse(localStorage.getItem('circuit-lab-ui')||'{}').pal!==false); } catch(e){ setPal(true); }
+const uiPrefs=()=>{ try { return JSON.parse(localStorage.getItem('circuit-lab-ui')||'{}')||{}; } catch(e){ return {}; } };
+const putPrefs=p=>{ try { localStorage.setItem('circuit-lab-ui', JSON.stringify(Object.assign(uiPrefs(),p))); } catch(e){} };
+setPal(uiPrefs().pal!==false);
+function setDepth(on){ depth=on; const b=$('#depth'); b.setAttribute('aria-pressed',String(on)); b.textContent='มุมมอง 2.5D: '+(on?'เปิด':'ปิด'); }
+setDepth(uiPrefs().depth===true);
+$('#depth').onclick=()=>{ setDepth(!depth); putPrefs({depth}); };
 palBtn.onclick=()=>{ const open=app.classList.contains('palhide'); setPal(open);
-  try { localStorage.setItem('circuit-lab-ui', JSON.stringify({pal:open})); } catch(e){} };
+  putPrefs({pal:open}); };
 
 let last=performance.now(), fr=0, reduce=false;
 try { reduce = matchMedia('(prefers-reduced-motion: reduce)').matches; } catch(e){}
