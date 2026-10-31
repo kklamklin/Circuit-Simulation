@@ -1351,8 +1351,8 @@ $('#speed').onchange=e=>{ speed=parseFloat(e.target.value); };
 const setMode=m=>{ elMode=m; $('#mCur').setAttribute('aria-pressed',String(!m)); $('#mEl').setAttribute('aria-pressed',String(m)); };
 $('#mCur').onclick=()=>setMode(false); $('#mEl').onclick=()=>setMode(true);
 
-// the version (with an optional tag, e.g. '1.0.3.0 alpha') is written here and in the name of the version file ("version 1.0.3.2 alpha.txt"); change both together
-const VERSION = '1.0.3.2 alpha';
+// the version (with an optional tag, e.g. '1.0.3.0 alpha') is written here and in the name of the version file ("version 1.0.4.0 beta.txt"); change both together
+const VERSION = '1.0.4.0 beta';
 { const a=$('#ver'); a.textContent='เวอร์ชัน '+VERSION; a.href=encodeURI('version '+VERSION+'.txt'); a.parentElement.hidden=false; }
 
 /* ---------- sizing + loop ---------- */
@@ -1376,9 +1376,31 @@ try { document.fonts.ready.then(resize); } catch(e){}
 // palette beside the board can be folded away on small screens; the choice is remembered in this browser
 const app=$('.app'), palBtn=$('#palBtn');
 function setPal(open){ app.classList.toggle('palhide', !open); palBtn.setAttribute('aria-expanded', String(open)); }
-try { setPal(JSON.parse(localStorage.getItem('circuit-lab-ui')||'{}').pal!==false); } catch(e){ setPal(true); }
-palBtn.onclick=()=>{ const open=app.classList.contains('palhide'); setPal(open);
-  try { localStorage.setItem('circuit-lab-ui', JSON.stringify({pal:open})); } catch(e){} };
+// small per-browser preferences (palette folded, sound on/off) share one key and are merged on every write
+const uiPrefs=()=>{ try { return JSON.parse(localStorage.getItem('circuit-lab-ui')||'{}')||{}; } catch(e){ return {}; } };
+const putPrefs=p=>{ try { localStorage.setItem('circuit-lab-ui', JSON.stringify(Object.assign(uiPrefs(),p))); } catch(e){} };
+setPal(uiPrefs().pal!==false);
+palBtn.onclick=()=>{ const open=app.classList.contains('palhide'); setPal(open); putPrefs({pal:open}); };
+
+/* ---------- sound ---------- */
+// assets/click.mp3 on every click; assets/success-notification.mp3 each time current starts to flow in the circuit
+// (again after it has gone quiet). Browsers refuse sound before the first tap or click: play() failures are ignored on purpose.
+let soundOn = uiPrefs().snd!==false;
+const mkSnd = (src, vol, n) => { const a=Array.from({length:n},()=>{ const e=new Audio(src); e.preload='auto'; e.volume=vol; return e; }); let k=0;
+  return () => { if (!soundOn) return; try { const e=a[k++%n]; e.currentTime=0; const p=e.play(); if (p && p.catch) p.catch(()=>{}); } catch(err){} }; };
+const playClick = mkSnd('assets/click.mp3', 0.5, 4), playOk = mkSnd('assets/success-notification.mp3', 0.7, 1);
+function setSound(on){ soundOn=on; const b=$('#snd'); b.setAttribute('aria-pressed',String(on)); b.textContent='เสียง: '+(on?'เปิด':'ปิด'); }
+setSound(soundOn);
+$('#snd').addEventListener('click', () => { setSound(!soundOn); putPrefs({snd:soundOn}); if (soundOn) playClick(); });
+document.addEventListener('click', e => { if (e.target.closest && !e.target.closest('#snd')) playClick(); }, true);
+// "current is flowing" = some part other than a meter or ground carries more than 1 µA. It must stay quiet for 0.6 s before it counts as gone,
+// so an AC wave passing through zero does not re-trigger the sound.
+let flowOn=false, flowSeen=0;
+function trackFlow(now){
+  let m=0; for (const c of comps) if (c.type!=='vm' && c.type!=='gnd') m=Math.max(m,Math.abs(c.i));
+  if (m>1e-6){ flowSeen=now; if (!flowOn){ flowOn=true; playOk(); } }
+  else if (flowOn && now-flowSeen>600) flowOn=false;
+}
 
 let last=performance.now(), fr=0, reduce=false;
 try { reduce = matchMedia('(prefers-reduced-motion: reduce)').matches; } catch(e){}
@@ -1403,6 +1425,7 @@ function loop(now){
       if (c.type==='led') c.glow=Math.abs(c.i)/0.02;
     }
     $('#warn').hidden=!big;
+    trackFlow(now);
     const ph = reduce ? 0.35 : 1;
     for (const el of comps) el.phase+=flowSpeed(el.i)*rdt*Math.sqrt(speed)*ph;
     for (const el of wires) el.phase+=flowSpeed(el.i)*rdt*Math.sqrt(speed)*ph;

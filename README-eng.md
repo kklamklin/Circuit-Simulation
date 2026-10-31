@@ -21,6 +21,7 @@ Open `index.html` in a browser (keep `style.css` and `app.js` in the same folder
 - **Oscilloscope.** Plot voltage and current of the selected component over time.
 - **Text circuit code.** Import and export circuits as plain text, so an AI assistant can write a circuit from a problem statement and you paste it in to build it instantly.
 - **Saved circuits** in the browser, and undo with Ctrl+Z.
+- **Sound.** A click sound on every click, and a notification sound when current starts to flow in the circuit (again whenever it flows after the circuit has gone quiet). The "เสียง" button turns it off.
 - **Works on phones and tablets.** The whole board fits on the first screen, with the toolbar above it, the component palette beside it (fold it away with ≡), and the controls and readouts below. On phones the effects are lightened automatically so it stays smooth.
 
 ## Components
