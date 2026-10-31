@@ -1351,8 +1351,8 @@ $('#speed').onchange=e=>{ speed=parseFloat(e.target.value); };
 const setMode=m=>{ elMode=m; $('#mCur').setAttribute('aria-pressed',String(!m)); $('#mEl').setAttribute('aria-pressed',String(m)); };
 $('#mCur').onclick=()=>setMode(false); $('#mEl').onclick=()=>setMode(true);
 
-// the version (with an optional tag, e.g. '1.0.3.0 alpha') is written here and in the name of the version file ("version 1.0.3.1.txt"); change both together
-const VERSION = '1.0.3.1';
+// the version (with an optional tag, e.g. '1.0.3.0 alpha') is written here and in the name of the version file ("version 1.0.3.2 alpha.txt"); change both together
+const VERSION = '1.0.3.2 alpha';
 { const a=$('#ver'); a.textContent='เวอร์ชัน '+VERSION; a.href=encodeURI('version '+VERSION+'.txt'); a.parentElement.hidden=false; }
 
 /* ---------- sizing + loop ---------- */
