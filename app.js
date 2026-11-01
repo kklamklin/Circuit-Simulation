@@ -540,15 +540,32 @@ function flowDots(x, el, color, Px, Py, uu){
 }
 function dots(el, color){ flowDots(ctx, el, color, P, P, u); }
 
-function pill(text, x, y, al='c', strong=false){
-  ctx.font=`500 ${Math.max(11,Math.round(u*0.4))}px "IBM Plex Mono","IBM Plex Sans Thai", monospace`;
-  const w=ctx.measureText(text).width+10, h=Math.max(16,u*0.58);
-  const x0 = al==='l' ? x : al==='r' ? x-w : x-w/2;
-  let px=Math.min(Math.max(x0,2),side-w-2), py=Math.min(Math.max(y-h/2,2),side-h-2);
-  ctx.fillStyle=C.panel; ctx.strokeStyle=C.line; ctx.lineWidth=1;
-  ctx.beginPath(); ctx.roundRect ? ctx.roundRect(px,py,w,h,5) : ctx.rect(px,py,w,h); ctx.fill(); ctx.stroke();
-  ctx.fillStyle=C.ink; ctx.textAlign='left'; ctx.textBaseline='middle'; ctx.fillText(text,px+5,py+h/2+0.5);
+// subscripts: a single letter, "_", then letters or digits (V_R1, I_total, V_ขั้ว) is written V with R1 small and lowered.
+// Part names, formulas and meter names in the explanation pages all use this, so nothing shows a raw underscore
+const SUBRE = /(^|[^A-Za-z\u0E00-\u0E7F])([A-Za-z])_([A-Za-z0-9\u0E00-\u0E7F]+(?:_[A-Za-z0-9]+)*)/g;
+function richSegs(text){
+  const out=[]; let last=0; SUBRE.lastIndex=0; let m;
+  while ((m=SUBRE.exec(text))){ out.push({t:text.slice(last, m.index)+m[1]+m[2]}); out.push({t:m[3].replace(/_/g,','), sub:true}); last=m.index+m[0].length; }
+  out.push({t:text.slice(last)}); return out.filter(g=>g.t);
 }
+const MONO='"IBM Plex Mono","IBM Plex Sans Thai", monospace';
+const richFont = (g, px) => `500 ${g.sub ? Math.round(px*0.74) : px}px ${MONO}`;
+function richWidth(x, segs, px){ let w=0; for (const g of segs){ x.font=richFont(g,px); w+=x.measureText(g.t).width; } return w; }
+function richText(x, segs, x0, y, px){ let cx=x0; for (const g of segs){ x.font=richFont(g,px); x.fillText(g.t, cx, y+(g.sub?px*0.26:0)); cx+=x.measureText(g.t).width; } }
+// a label box with the text inside, on any canvas of width W and height H
+function labelBox(x, text, ax, ay, al, px, W, H){
+  const segs=richSegs(text), w=richWidth(x,segs,px)+10, h=Math.max(16,px*1.45);
+  const x0 = al==='l' ? ax : al==='r' ? ax-w : ax-w/2;
+  const bx=Math.min(Math.max(x0,2),W-w-2), by=Math.min(Math.max(ay-h/2,2),H-h-2);
+  x.fillStyle=C.panel; x.strokeStyle=C.line; x.lineWidth=1;
+  x.beginPath(); x.roundRect ? x.roundRect(bx,by,w,h,5) : x.rect(bx,by,w,h); x.fill(); x.stroke();
+  x.fillStyle=C.ink; x.textAlign='left'; x.textBaseline='middle'; richText(x, segs, bx+5, by+h/2+0.5, px);
+}
+function pill(text, x, y, al='c'){ labelBox(ctx, text, x, y, al, Math.max(11,Math.round(u*0.4)), side, side); }
+// the same for HTML: text must already be escaped
+const subHTML = h => h.replace(SUBRE, (m,pre,b,sub) => `${pre}${b}<sub>${sub.replace(/_/g,',')}</sub>`);
+const escH = v => String(v).replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
+const labH = c => subHTML(escH(lab(c)));
 
 function labelText(c){
   let v='';
@@ -1059,7 +1076,7 @@ function renderPop(){
   let h=`<div class="poph"><b>${nd?L(`จุด (${nd.x}, ${nd.y})`,`Node (${nd.x}, ${nd.y})`):L('สิ่งที่เลือก','Selection')}</b><span>${L(`${items.length} รายการ`,`${items.length} item${items.length>1?'s':''}`)}</span><button data-a="close">${L('ปิด','Close')}</button></div>`;
   for (const it of items){
     if (it.c){ const c=it.c, fs=shownFields(c.type), fn=f=>fName(c.type,f);
-      h+=`<div class="pi${c.off?' off':''}" data-id="c${c.id}"><div class="pih"><span class="tag" style="--c:${tagCol(c)}">${lab(c)}</span><span class="cname">${tName(c.type)}${c.off?L(' · พักอยู่',' · disabled'):''}${c.broken?L(' · ไหม้',' · burnt'):''}</span></div>
+      h+=`<div class="pi${c.off?' off':''}" data-id="c${c.id}"><div class="pih"><span class="tag" style="--c:${tagCol(c)}">${labH(c)}</span><span class="cname">${tName(c.type)}${c.off?L(' · พักอยู่',' · disabled'):''}${c.broken?L(' · ไหม้',' · burnt'):''}</span></div>
         <div class="pia">${fs.length?`<button data-a="edit" aria-expanded="${popEdit.has(c.id)}">${L('ปรับค่า','Edit')}</button>`:''}${c.type==='sw'?`<button data-a="sw">${c.on?L('ตัดสวิตช์','Open switch'):L('ต่อสวิตช์','Close switch')}</button>`:''}<button data-a="off">${c.off?L('เปิดใช้งาน','Enable'):L('พักการทำงาน','Disable')}</button><button data-a="del" class="danger">${L('ลบ','Delete')}</button></div>
         ${fs.length && popEdit.has(c.id) ? `<div class="cparams">${fs.map(f=>`<label class="pf" title="${fn(f)}"><span>${f[5]?fn(f):f[0]}</span>${fieldCtl(c,f,`aria-label="${lab(c)} ${fn(f)}"`)}<span>${f[2]}</span></label>`).join('')}</div>` : ''}</div>`;
     } else { const w=it.w;
@@ -1119,7 +1136,7 @@ function renderInsp(){
     $('#bDel').onclick=deleteSel; if (sel.broken) $('#bFix').onclick=()=>{ repair(sel); renderInsp(); }; return;
   }
   shownBroken=sel.broken;
-  let h=`<h3>${lab(sel)} · ${tName(sel.type)}${stateTag(sel)}</h3><p class="desc">${tDesc(sel.type)}</p>`;
+  let h=`<h3>${labH(sel)} · ${tName(sel.type)}${stateTag(sel)}</h3><p class="desc">${tDesc(sel.type)}</p>`;
   if (sel.type!=='vm') h+=`<div class="therm" title="${L('อุณหภูมิเทียบกับจุดไหม้','Temperature against the burn point')} ${TFAIL} °C"><span id="rTh" style="width:0"></span></div>`;
   for (const f of shownFields(sel.type))
     h+=`<label class="field"><span>${fName(sel.type,f)}</span>${fieldCtl(sel,f,`id="f_${f[0]}"`)}<span class="unit">${f[2]}</span></label>`;
@@ -1170,7 +1187,7 @@ function renderList(){
     const offb=c.off?`<span class="state st-hot">${L('พักอยู่','Disabled')}</span><button data-act="off">${L('เปิดใช้งาน','Enable')}</button>`:'';
     const fix=c.broken?`<span class="state st-dead">${L('ไหม้แล้ว','Burnt')}</span><button data-act="fix" class="danger">${L('ซ่อม','Repair')}</button>`:'';
     const lv=[['V','v'],['I','i'],['P','p'],['T','t']].map(([sy,k])=>`<span class="lv">${sy}<b data-l="${k}">–</b></span>`).join('');
-    return `<div class="crow${c===sel?' on':''}${c.off?' off':''}" data-cid="${c.id}"><div class="chead"><span class="tag" style="--c:${tagCol(c)}">${lab(c)}</span><span class="cname">${tName(c.type)}</span>${sw}${offb}${fix}</div>${ps?`<div class="cparams">${ps}</div>`:''}<div class="clive">${lv}</div></div>`; }).join('');
+    return `<div class="crow${c===sel?' on':''}${c.off?' off':''}" data-cid="${c.id}"><div class="chead"><span class="tag" style="--c:${tagCol(c)}">${labH(c)}</span><span class="cname">${tName(c.type)}</span>${sw}${offb}${fix}</div>${ps?`<div class="cparams">${ps}</div>`:''}<div class="clive">${lv}</div></div>`; }).join('');
   updateList();
 }
 function updateList(){
@@ -1502,8 +1519,8 @@ $('#speed').onchange=e=>{ speed=parseFloat(e.target.value); };
 const setMode=m=>{ elMode=m; $('#mCur').setAttribute('aria-pressed',String(!m)); $('#mEl').setAttribute('aria-pressed',String(m)); };
 $('#mCur').onclick=()=>setMode(false); $('#mEl').onclick=()=>setMode(true);
 
-// the version (with an optional tag, e.g. '1.0.3.0 alpha') is written here and in the name of the version file ("version 1.1.0.0 alpha.txt"); change both together
-const VERSION = '1.1.0.0 alpha';
+// the version (with an optional tag, e.g. '1.0.3.0 alpha') is written here and in the name of the version file ("version 1.1.1.0 alpha.txt"); change both together
+const VERSION = '1.1.1.0 alpha';
 const verLabel = () => { const a=$('#ver'); a.textContent=L('เวอร์ชัน ','Version ')+VERSION; a.href=encodeURI('version '+VERSION+'.txt'); a.parentElement.hidden=false; };
 verLabel();
 
@@ -1646,15 +1663,11 @@ function drawMini(cv, st, o={}){
   for (const c of cs){ bump(K(c.ax,c.ay)); if (c.type!=='gnd') bump(K(c.bx,c.by)); }
   for (const [k,n] of deg){ const gx=k%N, gy=(k-gx)/N; x.fillStyle=C.wire; x.beginPath(); x.arc(Px(gx),Py(gy), (n>=3?0.17:0.12)*uu, 0, 7); x.fill(); }
   if (o.flow){ for (const w of ws) flowDots(x, w, elMode?C.el:C.copper, Px, Py, uu); for (const c of cs) if (c.type!=='vm' && c.type!=='gnd') flowDots(x, c, elMode?C.el:C.copper, Px, Py, uu); }
-  if (o.labels){ x.font=`500 ${Math.max(10,Math.round(uu*0.36))}px "IBM Plex Mono","IBM Plex Sans Thai",monospace`; x.textBaseline='middle';
-    const pill=(text, px, py, al) => { const w=x.measureText(text).width+8, h=Math.max(14,uu*0.5);
-      let lx = al==='l' ? px : px-w/2; lx=Math.min(Math.max(lx,2),W-w-2); const ly=Math.min(Math.max(py-h/2,2),H-h-2);
-      x.fillStyle=C.panel; x.strokeStyle=C.line; x.lineWidth=1; x.beginPath(); x.roundRect ? x.roundRect(lx,ly,w,h,4) : x.rect(lx,ly,w,h); x.fill(); x.stroke();
-      x.fillStyle=C.ink; x.textAlign='left'; x.fillText(text, lx+4, ly+h/2+0.5); };
+  if (o.labels){ const fs=Math.max(10,Math.round(uu*0.36));
     for (const c of cs){ if (c.type==='gnd') continue; const mx=(Px(c.ax)+Px(c.bx))/2, my=(Py(c.ay)+Py(c.by))/2, txt=labelText(c);
-      if (c.ay===c.by) pill(txt, mx, my-uu*0.9, 'c'); else pill(txt, mx+uu*0.6, my, 'l'); } }
+      if (c.ay===c.by) labelBox(x, txt, mx, my-uu*0.9, 'c', fs, W, H); else labelBox(x, txt, mx+uu*0.6, my, 'l', fs, W, H); } }
   if (o.time){ x.font=`500 ${Math.max(10,Math.round(uu*0.34))}px "IBM Plex Mono",monospace`; x.textAlign='left'; x.textBaseline='top'; x.fillStyle=C.muted;
-    x.fillText(`t = ${st.t.toFixed(2)} s${st.ideal?'':' · REAL'}`, 8, 8); }
+    x.fillText(`t = ${st.t.toFixed(2)} s${st.ideal?'':' · REAL'}`, 24, 12); }
 }
 // the live example board on a detail page
 let mini=null;
@@ -1682,7 +1695,8 @@ function drawSym(cv, type){
   cv.width=Math.round(w*d); cv.height=Math.round(h*d);
   const x=cv.getContext('2d'); x.setTransform(d,0,0,d,0,0); x.clearRect(0,0,w,h);
   const uu=Math.min(w/2.3, h/1.5); x.translate((w-2*uu)/2, h/2);
-  drawSymbol(x,{type,glow:0,on:true,color:0},uu,Object.assign({},C,{bg:C.panel}),0);
+  x.shadowColor='rgba(216,232,225,.5)'; x.shadowBlur=glow(Math.max(3,uu*0.18));   // symbols sit on a small board tile, drawn like the parts on the board
+  drawSymbol(x,{type,glow:0,on:true,color:0},uu,Object.assign({},C,{ink:C.silk}),0);
 }
 const MENU_ICON = `DC 0,2 0,0 E=9\nB 4,0 4,2 R=20\nW 0,0 4,0\nW 0,2 4,2`;
 function drawMenuIcons(){
@@ -1720,54 +1734,74 @@ function tryOnBoard(key){
   if (comps.length||wires.length) askConfirm(L(`เปิด "${f.title}" แทนวงจรบนแผงตอนนี้ใช่ไหม วงจรเดิมจะหายถ้ายังไม่ได้บันทึก`,`Open "${f.title}" in place of the circuit on the board? The current circuit is lost unless you saved it.`), L('เปิดวงจร','Open circuit'), go);
   else go();
 }
-const ulist = a => `<ul>${(a||[]).map(v=>`<li>${esc(tx(v))}</li>`).join('')}</ul>`;
-const miniBox = () => `<div class="mini"><canvas id="miniCv"></canvas><button class="mre" data-restart>${L('↻ เริ่มใหม่','↻ Restart')}</button></div>`;
+// text from knowledge.js shown as HTML: escaped, x^(…) and x^−1 as superscripts, V_R1 as subscripts,
+// and a circuit id written in the text (short_resistor) becomes a link to that circuit, showing its title
+function rich(v){
+  let h=esc(tx(v));
+  const ids=KN.circuits.map(c=>c.id).sort((a,b)=>b.length-a.length);
+  if (ids.length) h=h.replace(new RegExp(`(?<![\\w])(${ids.join('|')})(?![\\w])`,'g'), id=>`\u0001${id}\u0002`);
+  h=h.replace(/\^\(([^)]*)\)/g,'<sup>$1</sup>').replace(/\^([−\-+]?[0-9.]+|[A-Za-z]+)/g,'<sup>$1</sup>');
+  h=subHTML(h);
+  return h.replace(/\u0001([\w]+)\u0002/g, (m,id)=>{ const c=KN.circuits.find(x=>x.id===id); return `<button class="clink" data-open="circ:${id}">${esc(tx(c.title))}</button>`; });
+}
+const ulist = a => `<ul class="pads">${(a||[]).map(v=>`<li>${rich(v)}</li>`).join('')}</ul>`;
+const miniBox = () => `<div class="mini"><span class="mlive">${L('จำลองสด','LIVE')}</span><canvas id="miniCv"></canvas><button class="mre" data-restart>${L('↻ เริ่มใหม่','↻ Restart')}</button></div>`;
 const tryBtn = key => `<button class="primary" data-try="${key}">${L('ลองบนแผง','Try it on the board')}</button>`;
+const sec = (title, body, cls='') => `<section class="dsec ${cls}"><h4><i class="pad" aria-hidden="true"></i>${title}</h4>${body}</section>`;
+const two = n => String(n).padStart(2,'0');
 function renderDoc(){
   miniStop();
   const v=docStack[docStack.length-1]; if (!v){ closeDoc(); return; }
-  const title=$('#docTitle');
+  const title=$('#docTitle'), kick=$('#docKick');
   if (v.v==='devs'){
+    kick.textContent=L(`อุปกรณ์ · ${KN.devices.length} ชิ้น`,`Components · ${KN.devices.length}`);
     title.textContent=L('อุปกรณ์วงจร','Circuit components');
     const groups=[]; for (const d of KN.devices){ const g=tx(d.group); let G=groups.find(x=>x.g===g); if (!G) groups.push(G={g, items:[]}); G.items.push(d); }
+    let n=0;
     docBody.innerHTML=`<p class="dlead">${L('เลือกอุปกรณ์เพื่อดูว่าทำอะไร ทำงานอย่างไร และวงจรพื้นฐานของมัน','Pick a part to see what it does, how it behaves, and a basic circuit with it')}</p>`
-      + groups.map(G=>`<h3 class="dgrp">${esc(G.g)}</h3><div class="dlist">${G.items.map(d=>`<button class="ditem" data-open="dev:${d.id}"><canvas data-sym="${d.id}" aria-hidden="true"></canvas><span><b>${esc(tx(d.name))}</b><small>${esc(tx(d.what))}</small></span><i class="code">${esc(d.code)}</i></button>`).join('')}</div>`).join('');
+      + groups.map(G=>`<h3 class="dgrp"><span>${esc(G.g)}</span></h3><div class="dlist">${G.items.map(d=>`<button class="ditem" data-open="dev:${d.id}" style="--k:${n++}"><span class="dtile"><canvas data-sym="${d.id}" aria-hidden="true"></canvas></span><span class="dtx"><b>${esc(tx(d.name))}</b><small>${rich(d.what)}</small></span><i class="code">${esc(d.code)}</i></button>`).join('')}</div>`).join('');
   } else if (v.v==='dev'){
-    const d=KN.devices.find(x=>x.id===v.id); if (!d){ docBack(); return; }
+    const k=KN.devices.findIndex(x=>x.id===v.id), d=KN.devices[k]; if (!d){ docBack(); return; }
     const f=figure('dev:'+d.id);
+    kick.textContent=L(`อุปกรณ์ ${two(k+1)} / ${KN.devices.length}`,`Component ${two(k+1)} / ${KN.devices.length}`);
     title.textContent=tx(d.name);
-    docBody.innerHTML=`<div class="dhead"><canvas class="dbig" data-sym="${d.id}" aria-hidden="true"></canvas><div><p class="dkick">${esc(tx(d.group))} · ${esc(d.code)}</p><h3 class="dname">${esc(tx(d.name))}</h3><p>${esc(tx(d.what))}</p></div></div>
-      <section><h4>${L('พฤติกรรม','How it behaves')}</h4>${ulist(d.behavior)}</section>
-      ${d.formulas && d.formulas.length ? `<section><h4>${L('สูตร','Formulas')}</h4><div class="fchips">${d.formulas.map(x=>`<span>${esc(tx(x))}</span>`).join('')}</div></section>` : ''}
-      ${d.params && d.params.length ? `<section><h4>${L('ค่าที่ตั้งได้','Settings')}</h4><table class="dtab"><tr><th>${L('ค่า','Value')}</th><th>${L('เริ่มต้น','Default')}</th><th>${L('ความหมาย','Meaning')}</th></tr>${d.params.map(p=>`<tr><td>${esc(p.key)}</td><td class="num">${esc(p.default)}${p.unit?' '+esc(p.unit):''}</td><td>${esc(tx(p.meaning))}</td></tr>`).join('')}</table></section>` : ''}
-      <section class="dmodes"><div><h4>${L('โหมดอุดมคติ','Ideal mode')}</h4><p>${esc(tx(d.ideal_mode))}</p></div><div><h4>${L('โหมดจริง','Real mode')}</h4><p>${esc(tx(d.real_mode))}</p></div></section>
-      <section><h4>${L('ข้อควรระวัง','Watch out')}</h4>${ulist(d.watch_out)}</section>
-      <section class="dtry"><h4>${L('ลองทายก่อน','Guess first')}</h4><p>${esc(tx(d.try_it))}</p></section>
-      ${f ? `<section><h4>${L('วงจรพื้นฐาน','Basic circuit')}: ${esc(f.title)}</h4>${f.cap?`<p class="dcap">${esc(f.cap)}</p>`:''}${miniBox()}<div class="dacts">${tryBtn(f.key)}${f.ref?`<button data-open="circ:${f.ref}">${L('อ่านคำอธิบายวงจรนี้','Read about this circuit')}</button>`:''}</div></section>` : ''}`;
+    docBody.innerHTML=`<div class="dhero"><span class="dtile big"><canvas class="dbig" data-sym="${d.id}" aria-hidden="true"></canvas></span><div><p class="dkick">${esc(tx(d.group))} <span class="code">${esc(d.code)}</span></p><h3 class="dname">${esc(tx(d.name))}</h3><p class="dwhat">${rich(d.what)}</p></div></div>
+      ${sec(L('พฤติกรรม','How it behaves'), ulist(d.behavior))}
+      ${d.formulas && d.formulas.length ? sec(L('สูตร','Formulas'), `<div class="fchips">${d.formulas.map(x=>`<span>${rich(x)}</span>`).join('')}</div>`) : ''}
+      ${d.params && d.params.length ? sec(L('ค่าที่ตั้งได้','Settings'), `<div class="ptab">${d.params.map(p=>`<div class="prow"><code>${subHTML(esc(p.key))}</code><b>${esc(p.default)}${p.unit?' '+esc(p.unit):''}</b><span>${rich(p.meaning)}</span></div>`).join('')}</div>`) : ''}
+      <div class="dmodes"><div class="mode ideal"><p class="mtag">${L('โหมดอุดมคติ','Ideal mode')}</p><p>${rich(d.ideal_mode)}</p></div><div class="mode real"><p class="mtag">${L('โหมดจริง','Real mode')}</p><p>${rich(d.real_mode)}</p></div></div>
+      ${sec(L('ข้อควรระวัง','Watch out'), ulist(d.watch_out), 'warn')}
+      <section class="dsec guess"><p class="gtag">${L('ลองทายก่อน','Guess first')}</p><p>${rich(d.try_it)}</p></section>
+      ${f ? sec(`${L('วงจรพื้นฐาน','Basic circuit')} · ${esc(f.title)}`, `${f.cap?`<p class="dcap">${subHTML(esc(f.cap))}</p>`:''}${miniBox()}<div class="dacts">${tryBtn(f.key)}${f.ref?`<button data-open="circ:${f.ref}">${L('อ่านคำอธิบายวงจรนี้','Read about this circuit')}</button>`:''}</div>`, 'board') : ''}`;
     if (f) miniStart(f.code, $('#miniCv'));
   } else if (v.v==='circs'){
+    kick.textContent=L(`แนวคิด ${KN.concepts.length} · วงจร ${KN.circuits.length}`,`${KN.concepts.length} ideas · ${KN.circuits.length} circuits`);
     title.textContent=L('อธิบายวงจร','Circuit explanations');
-    const card=(open, fig, name, sub, text)=>`<button class="citem" data-open="${open}"><canvas data-fig="${fig}" aria-hidden="true"></canvas><span><b>${esc(name)}</b>${sub?`<i>${esc(sub)}</i>`:''}<small>${esc(text)}</small></span></button>`;
-    docBody.innerHTML=`<h3 class="dgrp">${L('แนวคิดพื้นฐาน','Basic ideas')}</h3><div class="clist2">${KN.concepts.map(c=>card('con:'+c.id, CON_FIG[c.id]||'', tx(c.title), '', tx(c.text))).join('')}</div>
-      <h3 class="dgrp">${L('วงจรตัวอย่าง','Example circuits')}</h3><div class="clist2">${KN.circuits.map(c=>card('circ:'+c.id, 'circ:'+c.id, tx(c.title), tx(c.topic), tx(c.why))).join('')}</div>`;
+    let n=0;
+    const card=(open, fig, name, sub, text)=>`<button class="citem" data-open="${open}" style="--k:${n++}"><span class="ctile"><canvas data-fig="${fig}" aria-hidden="true"></canvas></span><span class="dtx"><b>${esc(name)}</b>${sub?`<i>${esc(sub)}</i>`:''}<small>${rich(text)}</small></span></button>`;
+    docBody.innerHTML=`<h3 class="dgrp"><span>${L('แนวคิดพื้นฐาน','Basic ideas')}</span></h3><div class="clist2">${KN.concepts.map(c=>card('con:'+c.id, CON_FIG[c.id]||'', tx(c.title), '', c.text)).join('')}</div>
+      <h3 class="dgrp"><span>${L('วงจรตัวอย่าง','Example circuits')}</span></h3><div class="clist2">${KN.circuits.map(c=>card('circ:'+c.id, 'circ:'+c.id, tx(c.title), tx(c.topic), c.why)).join('')}</div>`;
+    // a link inside a card summary must not hijack the card
+    docBody.querySelectorAll('.citem .clink, .ditem .clink').forEach(b=>b.replaceWith(document.createTextNode(b.textContent)));
   } else if (v.v==='circ'){
-    const c=KN.circuits.find(x=>x.id===v.id); if (!c){ docBack(); return; }
+    const k=KN.circuits.findIndex(x=>x.id===v.id), c=KN.circuits[k]; if (!c){ docBack(); return; }
+    kick.textContent=L(`วงจร ${two(k+1)} / ${KN.circuits.length}`,`Circuit ${two(k+1)} / ${KN.circuits.length}`);
     title.textContent=tx(c.title);
     const src={meter:L('มิเตอร์','meter'), card:L('การ์ดอุปกรณ์','device card'), calculated:L('คำนวณเอง','work it out')};
     const when=r=>Array.isArray(r.t_s) ? `t = ${r.t_s[0]}–${r.t_s[1]} s` : (typeof r.t_s==='number' ? `t = ${r.t_s} s` : '');
-    docBody.innerHTML=`${miniBox()}<p class="dkick" style="margin-top:10px!important">${esc(tx(c.topic))} · ${/ideal=0/.test(c.code)?L('โหมดจริง','real mode'):L('โหมดอุดมคติ','ideal mode')}</p>
-      <div class="dacts">${tryBtn('circ:'+c.id)}</div>
-      <section><h4>${L('ทำไมจึงเป็นแบบนี้','Why it works this way')}</h4><p>${esc(tx(c.why))}</p></section>
-      <section><h4>${L('ค่าที่ควรอ่านได้','What you should read')}</h4><div class="rlist">${(c.readings||[]).map(r=>`<div class="rrow"><code>${esc(r.meter)}</code><b>${esc(typeof r.value==='number' ? fmt(r.value, r.unit||'') : r.value)}</b>${when(r)?`<em>${when(r)}</em>`:''}<em>${src[r.source]||esc(r.source||'')}</em>${r.note?`<small>${esc(tx(r.note))}</small>`:''}</div>`).join('')}</div></section>
-      <section class="dtry"><h4>${L('ลองทายก่อน','Guess first')}</h4><p>${esc(tx(c.try_it))}</p></section>`;
+    docBody.innerHTML=`${miniBox()}<div class="dbar"><p class="dkick">${esc(tx(c.topic))} · ${/ideal=0/.test(c.code)?L('โหมดจริง','real mode'):L('โหมดอุดมคติ','ideal mode')}</p>${tryBtn('circ:'+c.id)}</div>
+      ${sec(L('ทำไมจึงเป็นแบบนี้','Why it works this way'), `<p>${rich(c.why)}</p>`)}
+      ${sec(L('ค่าที่ควรอ่านได้','What you should read'), `<div class="rlist">${(c.readings||[]).map(r=>`<div class="rrow"><code>${subHTML(esc(r.meter))}</code><b>${esc(typeof r.value==='number' ? fmt(r.value, r.unit||'') : r.value)}</b>${when(r)?`<em>${when(r)}</em>`:''}<em>${src[r.source]||esc(r.source||'')}</em>${r.note?`<small>${rich(r.note)}</small>`:''}</div>`).join('')}</div>`)}
+      <section class="dsec guess"><p class="gtag">${L('ลองทายก่อน','Guess first')}</p><p>${rich(c.try_it)}</p></section>`;
     miniStart(c.code, $('#miniCv'));
   } else if (v.v==='con'){
-    const c=KN.concepts.find(x=>x.id===v.id); if (!c){ docBack(); return; }
+    const k=KN.concepts.findIndex(x=>x.id===v.id), c=KN.concepts[k]; if (!c){ docBack(); return; }
     const f=CON_FIG[c.id] && figure(CON_FIG[c.id]);
+    kick.textContent=L(`แนวคิด ${two(k+1)} / ${KN.concepts.length}`,`Idea ${two(k+1)} / ${KN.concepts.length}`);
     title.textContent=tx(c.title);
-    docBody.innerHTML=`${f?`${miniBox()}<p class="dcap" style="margin-top:6px">${L('วงจรประกอบ','Circuit shown')}: ${esc(f.title)}</p>`:''}
-      <section><p>${esc(tx(c.text))}</p>${ulist(c.points)}</section>
-      ${f?`<div class="dacts">${tryBtn(f.key)}${f.ref?`<button data-open="circ:${f.ref}">${L('อ่านคำอธิบายวงจรนี้','Read about this circuit')}</button>`:''}</div>`:''}`;
+    docBody.innerHTML=`${f?`${miniBox()}<div class="dbar"><p class="dcap">${L('วงจรประกอบ','Circuit shown')}: ${esc(f.title)}</p>${tryBtn(f.key)}</div>`:''}
+      <section class="dsec lead"><p>${rich(c.text)}</p>${ulist(c.points)}</section>
+      ${f && f.ref ? `<div class="dacts"><button data-open="circ:${f.ref}">${L('อ่านคำอธิบายวงจรนี้','Read about this circuit')}</button></div>` : ''}`;
     if (f) miniStart(f.code, $('#miniCv'));
   }
   docPage.querySelector('.docbox').scrollTop=0;
@@ -1843,7 +1877,7 @@ let soundOn = uiPrefs().snd!==false;
 const mkSnd = (src, vol, n) => { const a=Array.from({length:n},()=>{ const e=new Audio(src); e.preload='auto'; e.volume=vol; return e; }); let k=0;
   return () => { if (!soundOn) return; try { const e=a[k++%n]; e.currentTime=0; const p=e.play(); if (p && p.catch) p.catch(()=>{}); } catch(err){} }; };
 const playClick = mkSnd('assets/click.mp3', 0.5, 4), playOk = mkSnd('assets/success-notification.mp3', 0.7, 1);
-function setSound(on){ soundOn=on; const b=$('#snd'); b.setAttribute('aria-pressed',String(on)); b.textContent=L('เสียง: ','Sound: ')+(on?L('เปิด','on'):L('ปิด','off')); }
+function setSound(on){ soundOn=on; const b=$('#snd'); b.setAttribute('aria-checked',String(on)); b.querySelector('.tl').textContent=on?L('เปิด','On'):L('ปิด','Off'); }
 setSound(soundOn);
 $('#snd').addEventListener('click', () => { setSound(!soundOn); putPrefs({snd:soundOn}); if (soundOn) playClick(); });
 document.addEventListener('click', e => { if (e.target.closest && !e.target.closest('#snd')) playClick(); }, true);

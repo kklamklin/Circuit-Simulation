@@ -21,7 +21,7 @@ Open `index.html` in a browser (keep `style.css`, `app.js` and `knowledge.js` in
 - **Oscilloscope.** Plot voltage and current of the selected component over time.
 - **Text circuit code.** Import and export circuits as plain text, so an AI assistant can write a circuit from a problem statement and you paste it in to build it instantly.
 - **Saved circuits** in the browser, and undo with Ctrl+Z.
-- **Sound.** A click sound on every click, and a notification sound when current starts to flow in the circuit (again whenever it flows after the circuit has gone quiet). The "Sound" button turns it off.
+- **Sound.** A click sound on every click, and a notification sound when current starts to flow in the circuit (again whenever it flows after the circuit has gone quiet). The "Sound" switch in the menu turns it off.
 - **Menu (top left, three lines).** A "Components" page explains all 15 parts (symbol, what it does, how it behaves, formulas, settings, ideal and real mode, what to watch out for, and a basic circuit running live on the page). A "Circuits" page explains the basic ideas (nodes, short circuits, KCL, KVL and more) and 13 example circuits with what each meter should read. "Try it on the board" opens that circuit on the main board.
 - **Thai or English.** Thai is the default; choose English in the menu and every text on the page switches. The browser remembers the choice.
 - **Works on phones and tablets.** The whole board fits on the first screen, with the toolbar above it, the component palette beside it (fold it away with the side-panel button), and the controls and readouts below. On phones the effects are lightened automatically so it stays smooth.
