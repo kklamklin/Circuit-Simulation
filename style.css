@@ -193,6 +193,14 @@ button:active{transform:translateY(1px)}
 .ver a{color:var(--muted);text-decoration:none}
 .ver a:hover{color:var(--accent)}
 .palbtn,#undo svg{display:none}
+.brandtop{display:flex;align-items:center;gap:12px}
+.menubtn{display:inline-grid;place-items:center;flex:none;padding:7px 9px}
+.menubtn[aria-expanded="true"]{color:var(--accent);border-color:rgba(62,230,192,.45)}
+.menuw{position:fixed;inset:0;z-index:44;background:rgba(2,6,5,.6);animation:fadeIn .15s ease-out}
+.menubox{position:absolute;left:0;top:0;bottom:0;width:min(300px,86vw);background:linear-gradient(var(--panel-hi),var(--panel));border-right:1px solid var(--accent);box-shadow:20px 0 60px rgba(0,0,0,.6);padding:calc(env(safe-area-inset-top,0px) + 14px) 14px 14px calc(env(safe-area-inset-left,0px) + 14px);display:flex;flex-direction:column;gap:10px;overflow-y:auto;animation:menuIn .2s ease-out}
+.menuempty{color:var(--muted);font-size:13px;margin:0}
+@keyframes menuIn{from{transform:translateX(-24px);opacity:0}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){.menubox{animation:none}}
 #undo svg{flex:none}
 .lite .live::before{animation:none}
 /* compact layout (phones, tablets, narrow windows): toolbar on top, palette beside the board so the board fits the first screen; controls and info below */
@@ -204,6 +212,7 @@ button:active{transform:translateY(1px)}
   header,.main,.boardwrap{display:contents}
   header>.brand{grid-area:brand;display:flex;flex-wrap:wrap;align-items:center;gap:2px 12px}
   header>.brand .sub{flex-basis:100%;font-size:12.5px;line-height:1.35}
+  .brandtop{display:contents}
   header>.brand h1{order:1}
   header>.brand .live{margin-top:0;order:2}
   header>.brand .sub{order:3}

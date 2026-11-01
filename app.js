@@ -1437,9 +1437,18 @@ $('#speed').onchange=e=>{ speed=parseFloat(e.target.value); };
 const setMode=m=>{ elMode=m; $('#mCur').setAttribute('aria-pressed',String(!m)); $('#mEl').setAttribute('aria-pressed',String(m)); };
 $('#mCur').onclick=()=>setMode(false); $('#mEl').onclick=()=>setMode(true);
 
-// the version (with an optional tag, e.g. '1.0.3.0 alpha') is written here and in the name of the version file ("version 1.0.4.2 beta.txt"); change both together
-const VERSION = '1.0.4.2 beta';
+// the version (with an optional tag, e.g. '1.0.3.0 alpha') is written here and in the name of the version file ("version 1.0.5.0 beta.txt"); change both together
+const VERSION = '1.0.5.0 beta';
 { const a=$('#ver'); a.textContent='เวอร์ชัน '+VERSION; a.href=encodeURI('version '+VERSION+'.txt'); a.parentElement.hidden=false; }
+
+/* ---------- menu (hamburger, top left) ---------- */
+const menuPanel=$('#menuPanel'), menuBtn=$('#menuBtn');
+function openMenu(){ menuPanel.hidden=false; menuBtn.setAttribute('aria-expanded','true'); }
+function closeMenu(){ menuPanel.hidden=true; menuBtn.setAttribute('aria-expanded','false'); }
+menuBtn.onclick=()=>{ menuPanel.hidden ? openMenu() : closeMenu(); };
+$('#menuClose').onclick=closeMenu;
+menuPanel.addEventListener('click', e=>{ if (e.target===menuPanel) closeMenu(); });
+document.addEventListener('keydown', e=>{ if (e.key==='Escape' && !menuPanel.hidden && $('#confirm').hidden && $('#codePanel').hidden) closeMenu(); });
 
 /* ---------- sizing + loop ---------- */
 const stage=$('#stage'), compact=matchMedia('(max-width:1060px)');
