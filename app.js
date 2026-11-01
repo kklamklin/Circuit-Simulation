@@ -1,7 +1,10 @@
 (() => {
-const N = 20, DT = 5e-4, GMIN = 1e-9, RINT = 0.01, RAM = 1e-3, RVM = 1e7, RF = 0.05, RWH = 1e-3;
+// RINT: internal resistance of an ideal source, only enough to keep a shorted source finite. RSW: contact resistance of a real switch.
+// GOPEN (a 1 TΩ leak across each coil) and RTS (1 nΩ in the secondary) only keep an ideal transformer solvable when both coils are open
+// or two transformers share coils; everything else that is open is left out of the equations (see build)
+const N = 20, DT = 5e-4, RINT = 1e-4, RSW = 1e-3, RF = 0.05, RWH = 1e-3, GOPEN = 1e-12, RTS = 1e-9;
 const TA = 25, TSAFE = 100, TFAIL = 200, RAM_REAL = 0.1, RVM_REAL = 1e6;
-const DP = { diode:{Is:1e-14,nvt:0.02585}, led:{Is:1e-18,nvt:0.0517}, idiode:{Is:1e-6,nvt:0.002} };
+const DP = { diode:{Is:1e-14,nvt:0.02585}, led:{Is:1e-18,nvt:0.0517} };
 // LED colours: index 0 is red (the original LED, unchanged). The forward voltage at 20 mA sets the saturation current: Is = 0.02·exp(−Vf/nvt)
 const LEDC = [ {key:'red',name:'แดง',col:'#FF4D6D'}, {key:'orange',name:'ส้ม',col:'#FF8A3D',vf:2.0}, {key:'yellow',name:'เหลือง',col:'#FFD23F',vf:2.1},
   {key:'green',name:'เขียว',col:'#3DFF8A',vf:2.2}, {key:'blue',name:'ฟ้า',col:'#4DA3FF',vf:3.0}, {key:'white',name:'ขาว',col:'#F2F6FF',vf:3.1} ];
@@ -51,9 +54,9 @@ function showToast(kick, text){
 }
 const presetTitle = k => { const o=document.querySelector(`#preset option[value="${k}"]`); return o ? o.textContent : k; };
 const srcR = c => ideal ? RINT : c.r;
-const amR = () => ideal ? RAM : RAM_REAL;
-const vmR = () => ideal ? RVM : RVM_REAL;
-const dkey = c => (ideal && c.type==='diode') ? 'idiode' : c.type==='led' ? 'led'+(c.color|0) : c.type;
+const dkey = c => c.type==='led' ? 'led'+(c.color|0) : c.type;
+// ideal mode: a closed switch, an ammeter, a fuse and a conducting diode have no resistance at all, so they are joined like a wire
+const isShort = c => ideal && !c.off && !c.broken && (c.type==='am' || c.type==='fuse' || (c.type==='sw' && c.on) || (c.type==='diode' && !!c.don));
 const realOnly = k => k==='r' || k==='k' || /max$/.test(k);
 const shownFields = type => T[type].fields.filter(f => !(ideal && (realOnly(f[0]) || (type==='tp' && f[0]==='L'))));
 const REAL_PRESETS = new Set(['boom','fuse','short']);
@@ -150,9 +153,6 @@ const PRESETS = {
     path([[3,7],[3,3],[6,3]]); path([[8,3],[13,3],[13,7]]); path([[13,9],[13,14],[3,14],[3,9]]); path([[13,7],[16,7]]); path([[13,9],[16,9]]); return 3; },
   short(){ comps=[ mk('dc',3,9,3,7,{E:9}), mk('bulb',10,7,10,9,{R:20}), mk('sw',14,7,14,9,{on:false}) ];
     path([[3,7],[3,3],[10,3],[10,7]]); path([[10,9],[10,14],[3,14],[3,9]]); path([[10,7],[14,7]]); path([[10,9],[14,9]]); return 2; },
-  pat3(){ comps=[ mk('ac',2,11,2,9,{E:10,f:1}), mk('am',7,5,7,7,{name:'I_R'}), mk('res',7,9,7,11,{R:10,Pmax:50}), mk('am',11,5,11,7,{name:'I_L'}), mk('ind',11,9,11,11,{L:2}), mk('am',15,5,15,7,{name:'I_C'}), mk('cap',15,9,15,11,{C:50000,Vmax:25}) ];
-    path([[2,3],[15,3]]); path([[2,3],[2,9]]); path([[2,11],[2,15],[15,15]]);
-    for (const x of [7,11,15]){ path([[x,3],[x,5]]); path([[x,7],[x,9]]); path([[x,11],[x,15]]); } return 0; },
   trans(){ comps=[ mk('ac',3,5,3,3,{E:10,f:1}), mk('am',4,2,6,2,{name:'I_P'}), mk('tp',7,5,9,5,{grp:1,n:2,name:'T1'}), mk('ts',7,6,9,6,{grp:1}),
       mk('am',14,8,14,10,{name:'I_L'}), mk('res',14,12,14,14,{R:50,Pmax:100,name:'R'}), mk('vm',18,12,18,14,{name:'V_2'}), mk('gnd',1,5,1,7) ];
     path([[3,3],[3,2],[4,2]]); path([[6,2],[7,2],[7,5]]); path([[3,5],[1,5],[1,1],[11,1],[11,5],[9,5]]);
@@ -171,31 +171,76 @@ function loadPreset(name, announce){
 function build(){
   const uf = new Int32Array(N*N); for (let k=0;k<N*N;k++) uf[k]=k;
   const f = k => { while (uf[k]!==k){ uf[k]=uf[uf[k]]; k=uf[k]; } return k; };
-  for (const w of wires){ if (w.broken||w.off) continue; const a=f(K(w.ax,w.ay)), b=f(K(w.bx,w.by)); if (a!==b) uf[a]=b; }
+  const join = (p,q) => { p=f(p); q=f(q); if (p!==q) uf[p]=q; };
+  for (const w of wires) if (!w.broken && !w.off) join(K(w.ax,w.ay), K(w.bx,w.by));
+  const net = new Int32Array(N*N); for (let k=0;k<N*N;k++) net[k]=f(k);   // wire nets: points joined by wires alone
+  // ideal shorts join their two legs like a wire; their current is worked out afterwards from the currents around them (shortCurrents)
+  for (const c of comps){ c.short=isShort(c); if (c.short) join(K(c.ax,c.ay), K(c.bx,c.by)); }
   for (const c of comps){ c.ra=f(K(c.ax,c.ay)); c.rb=c.type==='gnd' ? c.ra : f(K(c.bx,c.by)); }   // a ground symbol only uses leg a
-  const u2 = new Int32Array(N*N); for (let k=0;k<N*N;k++) u2[k]=k;
-  const f2 = k => { while (u2[k]!==k){ u2[k]=u2[u2[k]]; k=u2[k]; } return k; };
-  for (const c of comps){ const a=f2(c.ra), b=f2(c.rb); if (a!==b) u2[a]=b; }
-  const gnd = new Map(), extraG = new Set();
-  // explicit ground symbols decide the 0 V node of their circuit; more than one in the same circuit are all held at 0 V
-  for (const c of comps) if (c.type==='gnd' && !c.off && !c.broken){ const is=f2(c.ra); if (!gnd.has(is)) gnd.set(is,c.ra); else if (gnd.get(is)!==c.ra) extraG.add(c.ra); }
-  for (const c of comps) if (c.type==='dc'||c.type==='ac'){ const is=f2(c.ra); if (!gnd.has(is)) gnd.set(is,c.ra); }
-  for (const c of comps){ const is=f2(c.ra); if (!gnd.has(is)) gnd.set(is,c.ra); }
-  const gset = new Set([...gnd.values(), ...extraG]), idx = new Map(); let n=0;
-  for (const c of comps) for (const r of [c.ra,c.rb]) if (!idx.has(r)) idx.set(r, gset.has(r) ? -1 : n++);
-  // transformer coils pair up by grp; a live pair is stamped together in step()
+  // transformer coils pair up by grp; a live pair is stamped together in solveNodes()
   const frees = comps.filter(c => c.type==='ts'), pairs = [];
   for (const c of comps){ c.pt=null; c.live=false; c.ju=-1; }
   for (const p of comps) if (p.type==='tp'){ const i=frees.findIndex(q => q.grp===p.grp); if (i>=0){ const q=frees.splice(i,1)[0]; p.pt=q; q.pt=p;
     if (!p.off && !p.broken && !q.off && !q.broken){ p.live=q.live=true; pairs.push(p); } } }
+  // parts that pass current tie their nodes into an island with its own 0 V reference. Open parts (open switch, ideal voltmeter, ideal diode
+  // that is off, parked or burnt part, coil without a partner) are left out of the equations, so they carry exactly no current
+  for (const c of comps) c.cond = !c.short && !c.off && !c.broken && c.type!=='gnd' && !(c.type==='sw' && !c.on) && !(c.type==='ts' && !c.live) && !(ideal && (c.type==='vm' || c.type==='diode'));
+  const u2 = new Int32Array(N*N); for (let k=0;k<N*N;k++) u2[k]=k;
+  const f2 = k => { while (u2[k]!==k){ u2[k]=u2[u2[k]]; k=u2[k]; } return k; };
+  for (const c of comps) if (c.cond){ const a=f2(c.ra), b=f2(c.rb); if (a!==b) u2[a]=b; }
+  const gnd = new Map(), extraG = new Set();
+  // explicit ground symbols decide the 0 V node of their circuit; more than one in the same circuit are all held at 0 V
+  for (const c of comps) if (c.type==='gnd' && !c.off && !c.broken){ const is=f2(c.ra); if (!gnd.has(is)) gnd.set(is,c.ra); else if (gnd.get(is)!==c.ra) extraG.add(c.ra); }
+  const grounded = new Set(gnd.keys());
+  for (const c of comps) if (c.type==='dc'||c.type==='ac'){ const is=f2(c.ra); if (!gnd.has(is)) gnd.set(is,c.ra); }
+  for (const c of comps) for (const r of [c.ra,c.rb]){ const is=f2(r); if (!gnd.has(is)) gnd.set(is,r); }
+  const gset = new Set([...gnd.values(), ...extraG]), idx = new Map(); let n=0;
+  for (const c of comps) for (const r of [c.ra,c.rb]) if (!idx.has(r)) idx.set(r, gset.has(r) ? -1 : n++);
   const nn=n; if (ideal) pairs.forEach((p,k)=>{ p.ju=nn+k; }); const nt = nn + (ideal ? pairs.length : 0);
-  // wire groups for per-segment current
+  // an island that only open parts touch would float: it takes the level that leaves its open links balanced, as if each were a huge resistance,
+  // an ideal voltmeter far less huge than an open switch or a diode that is off (a voltmeter with one lead in the air, or in series with an
+  // open switch, reads 0 like a real one). An island with a ground symbol, else one with a source, stays where it is
+  const isl = new Map(), nodeIsl = new Map(); let ni=0;
+  for (const r of idx.keys()){ const is=f2(r); if (!isl.has(is)) isl.set(is, ni++); nodeIsl.set(r, isl.get(is)); }
+  const links = comps.filter(c => !c.cond && !c.short && c.type!=='gnd' && f2(c.ra)!==f2(c.rb))
+    .map(c => [c.ra, c.rb, nodeIsl.get(c.ra), nodeIsl.get(c.rb), c.type==='vm' && !c.off && !c.broken ? 1 : 1e-12]);
+  let lev = null;
+  if (links.length){
+    const uc = Array.from({length:ni}, (_,k)=>k), fc = k => { while (uc[k]!==k){ uc[k]=uc[uc[k]]; k=uc[k]; } return k; };
+    for (const [,,I,J] of links){ const a=fc(I), b=fc(J); if (a!==b) uc[a]=b; }
+    const fixed = new Array(ni).fill(false), hasFix = new Set();
+    for (const is of grounded){ const I=isl.get(is); if (I!==undefined){ fixed[I]=true; hasFix.add(fc(I)); } }
+    const lead = c => { const I=nodeIsl.get(c.ra); if (I!==undefined && !hasFix.has(fc(I))){ fixed[I]=true; hasFix.add(fc(I)); } };
+    for (const c of comps) if (c.type==='dc'||c.type==='ac') lead(c);
+    for (const c of comps) lead(c);
+    const un = new Array(ni).fill(-1); let m=0;   // unknown level index of each floating island
+    for (const [,,I,J] of links) for (const K2 of [I,J]) if (!fixed[K2] && un[K2]<0) un[K2]=m++;
+    if (m){ const A=new Float64Array(m*m);
+      for (const [,,I,J,w] of links){ const p=un[I], q=un[J]; if (I===J) continue; if (p>=0) A[p*m+p]+=w; if (q>=0) A[q*m+q]+=w; if (p>=0&&q>=0){ A[p*m+q]-=w; A[q*m+p]-=w; } }
+      lev = { m, A, un, links, off:new Float64Array(ni) }; }
+  }
+  // wire groups for per-segment current, one per wire net
   const groups = new Map();
-  for (const w of wires){ if (w.broken||w.off){ w.i=0; continue; } const r=f(K(w.ax,w.ay)); if (!groups.has(r)) groups.set(r,{nodes:new Map(),ws:[]});
+  for (const w of wires){ if (w.broken||w.off){ w.i=0; continue; } const r=net[K(w.ax,w.ay)]; if (!groups.has(r)) groups.set(r,{nodes:new Map(),ws:[]});
     const g=groups.get(r); g.ws.push(w); for (const k of [K(w.ax,w.ay),K(w.bx,w.by)]) if (!g.nodes.has(k)) g.nodes.set(k,g.nodes.size); }
+  // short groups: per node, the wire nets its shorts join and which nets each short connects
+  const sg = new Map();
+  for (const c of comps) if (c.short){ let g=sg.get(c.ra); if (!g) sg.set(c.ra, g={nets:new Map(), cs:[]});
+    const ix = k => { const p=net[k]; if (!g.nets.has(p)) g.nets.set(p,g.nets.size); return g.nets.get(p); };
+    g.cs.push([c, ix(K(c.ax,c.ay)), ix(K(c.bx,c.by))]); }
+  const nl = comps.filter(c => c.type==='led' || (c.type==='diode' && !ideal));   // exponential junctions, solved by Newton-Raphson
   topo = { n:nt, nn, pairs, hasG:comps.some(c => c.type==='gnd'), idx, A:new Float64Array(nt*nt), b:new Float64Array(nt), x:new Float64Array(nt), groups, gset, find:f,
-    nonlin: comps.some(c => c.type==='diode'||c.type==='led') };
+    net, sg, nl, nodeIsl, lev, ids: ideal ? comps.filter(c => c.type==='diode' && !c.off && !c.broken) : [] };
   dirty = false;
+}
+// level of each floating island (see build): Kirchhoff's law over its open links, each link a conductance of weight w
+function levels(){
+  const L=topo.lev; if (!L) return;
+  const b=new Float64Array(L.m), x=new Float64Array(L.m);
+  for (const [ra,rb,I,J,w] of L.links){ if (I===J) continue; const d=XV(rb)-XV(ra), p=L.un[I], q=L.un[J];
+    if (p>=0){ b[p]+=w*d; if (q<0) b[p]+=w*L.off[J]; } if (q>=0){ b[q]-=w*d; if (p<0) b[q]+=w*L.off[I]; } }
+  solve(L.A.slice(), b, L.m, x);
+  L.un.forEach((k,I) => { if (k>=0) L.off[I]=x[k]; });
 }
 
 function solve(A, b, n, x){
@@ -209,20 +254,19 @@ function solve(A, b, n, x){
   for (let r=n-1;r>=0;r--){ let s=b[r]; for (let k=r+1;k<n;k++) s-=A[r*n+k]*x[k]; x[r]=s/A[r*n+r]; }
 }
 
+// Norton model of a part that passes current: current from a to b is i = g·v + j, v = V(a) − V(b).
+// Open parts and ideal shorts never get here (see build): an open part carries no current, a short's current comes from shortCurrents
 function gj(c){
-  if (c.broken || c.off) return [1e-10, 0];
   switch (c.type){
     case 'fuse': return [1/RF, 0];
     case 'res': case 'bulb': return [1/c.R, 0];
     case 'dc': { const Rs=srcR(c); return [1/Rs, c.E/Rs]; }
     case 'ac': { const Rs=srcR(c); return [1/Rs, c.E*Math.sin(2*Math.PI*c.f*t)/Rs]; }
-    case 'am': return [1/amR(), 0];
-    case 'vm': return [1/vmR(), 0];
-    case 'sw': return [c.on ? 1/RAM : 1e-10, 0];
+    case 'am': return [1/RAM_REAL, 0];
+    case 'vm': return [1/RVM_REAL, 0];
+    case 'sw': return [1/RSW, 0];
     case 'cap': { const G=c.C*1e-6/DT; return [G, -G*c.vp]; }
     case 'ind': case 'tp': { const G=DT/c.L; return [G, c.ip]; }   // a transformer coil without a partner is just an inductor
-    case 'ts': return [1e-10, 0];
-    case 'gnd': return [0, 0];
     case 'diode': case 'led': { const P=DP[dkey(c)], e=Math.exp(Math.min(c.vd/P.nvt, 80)), Id=P.Is*(e-1), Gd=P.Is/P.nvt*e+1e-12; return [Gd, Id-Gd*c.vd]; }
   }
   return [0,0];
@@ -233,20 +277,25 @@ function pnj(vn, vo, P){
   }
   return Math.max(vn, -200);
 }
-const NV = r => { const k=topo.idx.get(r); return k===undefined||k<0 ? 0 : topo.x[k]; };
+const XV = r => { const k=topo.idx.get(r); return k===undefined||k<0 ? 0 : topo.x[k]; };   // potential within its island
+const NV = r => { const L=topo.lev, I=topo.nodeIsl.get(r); return XV(r) + (L && I!==undefined ? L.off[I] : 0); };   // potential on the board
 
-function step(){
-  const {n, nn, idx, A, b, x, pairs} = topo;
+const kc = p => Math.min(0.9999, Math.max(0.5, p.k));
+// coupled coils: i1 = ip1 + DT(Γ11 v1 + Γ12 v2), i2 = ip2 + DT(Γ12 v1 + Γ22 v2), Γ = inverse inductance matrix, L2 = n²·L1, M = k·n·L1
+const gam = p => { const q=1-kc(p)**2, L1=p.L, nr=p.n; return [DT/(L1*q), -DT*kc(p)/(nr*L1*q), DT/(nr*nr*L1*q)]; };
+// node potentials for the present topology (Newton-Raphson when LEDs or real diodes are on the board)
+function solveNodes(){
+  const {n, idx, A, b, x, pairs} = topo;
+  if (!n) return;
   const add = (i,j,g) => { if (i>=0 && j>=0) A[i*n+j]+=g; };
-  const kc = p => Math.min(0.9999, Math.max(0.5, p.k));
-  // coupled coils: i1 = ip1 + DT(Γ11 v1 + Γ12 v2), i2 = ip2 + DT(Γ12 v1 + Γ22 v2), Γ = inverse inductance matrix, L2 = n²·L1, M = k·n·L1
-  const gam = p => { const q=1-kc(p)**2, L1=p.L, nr=p.n; return [DT/(L1*q), -DT*kc(p)/(nr*L1*q), DT/(nr*nr*L1*q)]; };
+  const stampG = (ia,ib,g) => { add(ia,ia,g); add(ib,ib,g); add(ia,ib,-g); add(ib,ia,-g); };
   function stampPair(p){
     const q=p.pt, ia=idx.get(p.ra), ib=idx.get(p.rb), ic=idx.get(q.ra), id=idx.get(q.rb);
     if (ideal){   // ideal transformer: V(c)-V(d) = n(V(a)-V(b)), I1 = -n·I2, one extra unknown I2 at row ju
       const J=p.ju, nr=p.n;
       add(ia,J,-nr); add(ib,J,nr); add(ic,J,1); add(id,J,-1);
       add(J,ic,1); add(J,id,-1); add(J,ia,-nr); add(J,ib,nr);
+      add(J,J,-RTS); if (p.ra!==p.rb) stampG(ia,ib,GOPEN); if (q.ra!==q.rb) stampG(ic,id,GOPEN);
       return;
     }
     const [g11,g12,g22]=gam(p), pt=[[ia,ib],[ic,id]], G=[[g11,g12],[g12,g22]], ip=[p.ip,q.ip];
@@ -255,35 +304,61 @@ function step(){
       for (let w=0;w<2;w++){ const g=G[u][w], [pw,mw]=pt[w]; add(pu,pw,g); add(pu,mw,-g); add(mu,pw,-g); add(mu,mw,g); }
     }
   }
-  if (n>0){
-    for (let it=0; it<60; it++){
-      A.fill(0); b.fill(0); for (let k=0;k<nn;k++) A[k*n+k]=GMIN;
-      for (const c of comps){
-        if (c.live) continue;
-        const [g,j]=gj(c), ia=idx.get(c.ra), ib=idx.get(c.rb);
-        if (ia>=0){ A[ia*n+ia]+=g; b[ia]-=j; }
-        if (ib>=0){ A[ib*n+ib]+=g; b[ib]+=j; }
-        if (ia>=0 && ib>=0){ A[ia*n+ib]-=g; A[ib*n+ia]-=g; }
-      }
-      for (const p of pairs) stampPair(p);
-      solve(A,b,n,x);
-      if (!topo.nonlin) break;
-      let conv=true;
-      for (const c of comps) if (c.type==='diode'||c.type==='led'){
-        const v=NV(c.ra)-NV(c.rb), vn=pnj(v,c.vd,DP[dkey(c)]);
-        if (Math.abs(vn-c.vd)>1e-6) conv=false; c.vd=vn;
-      }
-      if (conv) break;
+  for (let it=0; it<60; it++){
+    A.fill(0); b.fill(0);
+    for (const c of comps){
+      if (!c.cond || c.live || c.ra===c.rb) continue;   // a part with both legs on one node adds nothing, and stamping it would only cost precision
+      const [g,j]=gj(c), ia=idx.get(c.ra), ib=idx.get(c.rb);
+      stampG(ia,ib,g); if (ia>=0) b[ia]-=j; if (ib>=0) b[ib]+=j;
     }
+    for (const p of pairs) stampPair(p);
+    solve(A,b,n,x);
+    if (!topo.nl.length) break;
+    let conv=true;
+    for (const c of topo.nl){
+      const v=XV(c.ra)-XV(c.rb), vn=pnj(v,c.vd,DP[dkey(c)]);
+      if (Math.abs(vn-c.vd)>1e-6) conv=false; c.vd=vn;
+    }
+    if (conv) break;
   }
+}
+// voltage and current of every part from the node potentials
+function currents(){
+  const {x, pairs} = topo;
   for (const p of pairs){
-    const q=p.pt, v1=NV(p.ra)-NV(p.rb), v2=NV(q.ra)-NV(q.rb);
+    const q=p.pt, v1=XV(p.ra)-XV(p.rb), v2=XV(q.ra)-XV(q.rb);
     if (ideal){ const J=x[p.ju]; p.i=-p.n*J; q.i=J; }
     else { const [g11,g12,g22]=gam(p); p.i=p.ip+g11*v1+g12*v2; q.i=q.ip+g12*v1+g22*v2; }
   }
+  levels();
   for (const c of comps){
-    const v = n>0 ? NV(c.ra)-NV(c.rb) : 0;
-    if (c.live){ c.v=v; } else { const [g,j] = gj(c); c.v=v; c.i = n>0 || topo.hasG ? g*v+j : 0; }
+    c.v = c.cond ? XV(c.ra)-XV(c.rb) : NV(c.ra)-NV(c.rb);
+    if (!c.live && !c.short) c.i=0;
+    if (c.cond && !c.live){ const [g,j]=gj(c); c.i=g*c.v+j; }
+  }
+  if (topo.hasG){   // current that flows from each grounded net into earth, so wire currents stay balanced
+    const out=new Map(), cnt=new Map();
+    for (const c of comps) if (c.type!=='gnd'){ out.set(c.ra,(out.get(c.ra)||0)+c.i); out.set(c.rb,(out.get(c.rb)||0)-c.i); } else cnt.set(c.ra,(cnt.get(c.ra)||0)+1);
+    for (const c of comps) if (c.type==='gnd'){ const i=-(out.get(c.ra)||0)/cnt.get(c.ra); c.i = c.off||c.broken||Math.abs(i)<1e-9 ? 0 : i; }   // below 1 nA is only rounding
+  }
+  if (topo.ids.length) shortCurrents();   // an ideal diode needs its current every step to know when to switch off
+}
+// ideal diode: conducts (a short) while its current flows from a to b, off (open) while V(a) < V(b). Returns true if any diode switched
+function flipDiodes(){
+  let flip=false;
+  for (const c of topo.ids){ const on = c.don ? c.i > -1e-9 : c.v > 1e-9; if (on!==!!c.don){ c.don=on; flip=true; } }
+  if (flip) dirty=true;
+  return flip;
+}
+function step(){
+  // ideal diodes change the topology, so solve again until every diode agrees with its own current and voltage
+  for (let pass=0; ; pass++){
+    if (dirty) build();
+    solveNodes(); currents();
+    if (!topo.ids.length || pass>=8 || !flipDiodes()) break;
+  }
+  for (const c of comps){
+    const v = c.v;
     if (c.type==='cap') c.vp=v;
     if (c.type==='ind' || c.type==='tp' || c.type==='ts') c.ip=c.i;
     // energy bookkeeping
@@ -297,12 +372,7 @@ function step(){
     const [ph, pmax, tau] = thermal(c), Rth=(TSAFE-TA)/pmax, Cth=tau/Rth;
     c.pHeat = ph; c.pMax = pmax;
     c.temp = Math.min(3000, c.temp + (ph - (c.temp-TA)/Rth)/Cth*DT);
-    if (!c.broken && c.temp>=TFAIL && pmax<1e8){ c.broken=true; c.vd=0; c.failMsg=failText(c,ph,pmax); events.push(c); }
-  }
-  if (topo.hasG){   // current that flows from each grounded net into earth, so wire currents stay balanced
-    const out=new Map(), cnt=new Map();
-    for (const c of comps) if (c.type!=='gnd'){ out.set(c.ra,(out.get(c.ra)||0)+c.i); out.set(c.rb,(out.get(c.rb)||0)-c.i); } else cnt.set(c.ra,(cnt.get(c.ra)||0)+1);
-    for (const c of comps) if (c.type==='gnd'){ const i=-(out.get(c.ra)||0)/cnt.get(c.ra); c.i = c.off||c.broken||Math.abs(i)<1e-7 ? 0 : i; }   // below 100 nA is just the GMIN leak
+    if (!c.broken && c.temp>=TFAIL && pmax<1e8){ c.broken=true; c.vd=0; c.failMsg=failText(c,ph,pmax); events.push(c); dirty=true; }   // a burnt transformer coil must unpair
   }
   t += DT;
 }
@@ -310,8 +380,8 @@ function thermal(c){
   switch (c.type){
     case 'dc': case 'ac': return [c.i*c.i*srcR(c), c.Pmax, 1];
     case 'res': case 'bulb': return [Math.abs(c.v*c.i), c.Pmax, 1.5];
-    case 'sw': return [c.i*c.i*RAM, c.Pmax, 1];
-    case 'am': return [c.i*c.i*amR(), c.Pmax, 0.5];
+    case 'sw': return [c.i*c.i*RSW, c.Pmax, 1];
+    case 'am': return [c.i*c.i*RAM_REAL, c.Pmax, 0.5];
     case 'diode': case 'led': return [Math.abs(c.v*c.i), c.Pmax, 0.8];
     case 'cap': return [Math.max(0,Math.abs(c.v)-c.Vmax)*2, 1, 0.5];
     case 'ind': case 'tp': case 'ts': return [c.i*c.i, c.Imax*c.Imax, 2];
@@ -329,18 +399,40 @@ function failText(c, ph, pmax){
   return `${nm}ไหม้ กำลัง ${fmt(ph,'W')} เกินพิกัด ${fmt(pmax,'W')}`+at;
 }
 
-function wireCurrents(){
+// current that must leave each point (keyed by keyOf) through wires or shorts: what the other parts push in
+function injections(keyOf, skipShorts){
   const s = new Map();
-  for (const c of comps){ const ka=K(c.ax,c.ay), kb=K(c.bx,c.by); s.set(ka,(s.get(ka)||0)-c.i); if (c.type!=='gnd') s.set(kb,(s.get(kb)||0)+c.i); }
+  for (const c of comps){ if (skipShorts && c.short) continue;
+    const ka=keyOf(K(c.ax,c.ay)); s.set(ka,(s.get(ka)||0)-c.i);
+    if (c.type!=='gnd'){ const kb=keyOf(K(c.bx,c.by)); s.set(kb,(s.get(kb)||0)+c.i); } }
+  return s;
+}
+// split the injections of one connected network over its unit-conductance edges [p, q]: returns the current along each edge from p to q
+function spread(m, edges, inj){
+  const n=m-1; if (n<1) return edges.map(()=>0);
+  const A=new Float64Array(n*n), b=new Float64Array(n), x=new Float64Array(n);
+  for (const [p,q] of edges){ if (p===q) continue; if (p<n) A[p*n+p]+=1; if (q<n) A[q*n+q]+=1; if (p<n&&q<n){ A[p*n+q]-=1; A[q*n+p]-=1; } }
+  for (let k=0;k<n;k++) b[k]=inj(k);
+  solve(A,b,n,x);
+  const phi = k => k<n ? x[k] : 0;
+  return edges.map(([p,q]) => phi(p)-phi(q));
+}
+// current of each ideal short from Kirchhoff's current law over the wire nets it joins. Shorts in parallel share it as if each were the same
+// tiny resistance; a short that a wire bypasses gets nothing, and nothing leaks into a branch that a short bypasses
+function shortCurrents(){
+  if (!topo.sg.size) return;
+  const net=topo.net, s=injections(k => net[k], true);
+  for (const g of topo.sg.values()){
+    const keys=[...g.nets.keys()], cur=spread(g.nets.size, g.cs.map(e => [e[1], e[2]]), k => s.get(keys[k])||0);
+    g.cs.forEach((e,k) => { e[0].i=cur[k]; });
+  }
+}
+function wireCurrents(){
+  shortCurrents();
+  const s = injections(k => k, false);
   for (const g of topo.groups.values()){
-    const m=g.nodes.size; if (m<2){ g.ws.forEach(w=>w.i=0); continue; }
-    const n=m-1, A=new Float64Array(n*n), b=new Float64Array(n), x=new Float64Array(n);
-    for (const w of g.ws){ const p=g.nodes.get(K(w.ax,w.ay)), q=g.nodes.get(K(w.bx,w.by)); if (p===q) continue;
-      if (p<n) A[p*n+p]+=1; if (q<n) A[q*n+q]+=1; if (p<n&&q<n){ A[p*n+q]-=1; A[q*n+p]-=1; } }
-    for (const [k,ix] of g.nodes) if (ix<n) b[ix]=s.get(k)||0;
-    solve(A,b,n,x);
-    const phi = ix => ix<n ? x[ix] : 0;
-    for (const w of g.ws) w.i = phi(g.nodes.get(K(w.ax,w.ay))) - phi(g.nodes.get(K(w.bx,w.by)));
+    const keys=[...g.nodes.keys()], cur=spread(g.nodes.size, g.ws.map(w => [g.nodes.get(K(w.ax,w.ay)), g.nodes.get(K(w.bx,w.by))]), k => s.get(keys[k])||0);
+    g.ws.forEach((w,k) => { w.i=cur[k]; });
   }
 }
 
@@ -822,7 +914,7 @@ cv.addEventListener('pointermove', e => {
 cv.addEventListener('pointerup', () => {
   if (!drag) return; const d=drag; drag=null;
   if (d.mode==='move'){
-    if (!d.moved && d.c.type==='sw'){ d.c.on=!d.c.on; renderInsp(); }
+    if (!d.moved && d.c.type==='sw'){ d.c.on=!d.c.on; dirty=true; renderInsp(); }
     if (d.moved || d.c.type==='sw') save();
   } else if (d.mode==='wire'){
     const a=d.from, b=d.to;
@@ -949,7 +1041,7 @@ $('#pop').addEventListener('click', e=>{
   const id=b.closest('.pi').dataset.id, isC=id[0]==='c';
   const el=isC ? comps.find(x=>String(x.id)===id.slice(1)) : wires.find(x=>String(x.id)===id.slice(1)); if (!el) return;
   if (a==='edit'){ popEdit.has(el.id) ? popEdit.delete(el.id) : popEdit.add(el.id); renderPop(); return; }
-  if (a==='sw'){ el.on=!el.on; save(); }
+  if (a==='sw'){ el.on=!el.on; dirty=true; save(); }
   else if (a==='off'){ pushUndo(); el.off=!el.off; dirty=true; save(); say(`${isC?lab(el):'สายไฟ'} ${el.off?'พักการทำงานแล้ว ยังอยู่บนแผงแต่ไม่ได้ต่อในวงจร':'กลับมาทำงานแล้ว'}`); }
   else if (a==='del'){ pushUndo(); if (isC) comps=comps.filter(x=>x!==el); else wires=wires.filter(x=>x!==el); if (sel===el) select(null); dirty=true; save(); say(`ลบ${isC?lab(el):'สายไฟ'}แล้ว · Ctrl+Z ย้อนกลับ`); }
   renderPop(); renderInsp();
@@ -993,7 +1085,7 @@ function renderInsp(){
   insp.innerHTML=h;
   for (const [k,,,mn,mx] of d.fields){
   }
-  if (sel.type==='sw') $('#bSw').onclick=()=>{ sel.on=!sel.on; save(); renderInsp(); };
+  if (sel.type==='sw') $('#bSw').onclick=()=>{ sel.on=!sel.on; dirty=true; save(); renderInsp(); };
   $('#bRot').onclick=rotateSel; $('#bDel').onclick=deleteSel;
   $('#bOff').onclick=()=>{ pushUndo(); sel.off=!sel.off; dirty=true; save(); renderInsp(); renderPop(); };
   if (sel.broken) $('#bFix').onclick=()=>{ repair(sel); renderInsp(); };
@@ -1104,7 +1196,7 @@ $('#cNo').onclick=closeConfirm;
 $('#clist').addEventListener('click', e=>{
   const row=e.target.closest('.crow'); if (!row) return; const c=comps.find(x=>x.id==row.dataset.cid); if (!c) return;
   const act=e.target.closest('[data-act]');
-  if (act){ const a=act.dataset.act; if (a==='sw'){ c.on=!c.on; save(); } else if (a==='off'){ pushUndo(); c.off=!c.off; dirty=true; save(); renderPop(); } else repair(c); select(c); updateList(); return; }
+  if (act){ const a=act.dataset.act; if (a==='sw'){ c.on=!c.on; dirty=true; save(); } else if (a==='off'){ pushUndo(); c.off=!c.off; dirty=true; save(); renderPop(); } else repair(c); select(c); updateList(); return; }
   if (sel!==c) select(c);
 });
 document.addEventListener('input', e=>{
@@ -1216,27 +1308,21 @@ function toCode(){
   runs(H,(y,a,b)=>`W   ${a},${y} ${b},${y}`); runs(V,(x,a,b)=>`W   ${x},${a} ${x},${b}`);
   return out.concat(other).join('\n');
 }
-const SAMPLE_CODE = `CIRCUIT v1
-TITLE โจทย์ PAT3 ข้อ 14
-# โจทย์ PAT3 ข้อ 14 : R, L, C ต่อขนานกับแหล่งจ่าย AC
-AC  2,11 2,9  E=10 f=1
-AM  7,5 7,7   name=I_R
-R   7,9 7,11  R=10 Pmax=50
-AM  11,5 11,7 name=I_L
-L   11,9 11,11 L=2
-AM  15,5 15,7 name=I_C
-C   15,9 15,11 C=50000
-W   2,9 2,3 15,3           # รางบน
-W   2,11 2,15 15,15        # รางล่าง
-W   7,3 7,5
-W   7,7 7,9
-W   7,11 7,15
-W   11,3 11,5
-W   11,7 11,9
-W   11,11 11,15
-W   15,3 15,5
-W   15,7 15,9
-W   15,11 15,15`;
+const SAMPLE_CODE = `CIRCUIT v1 ideal=1
+TITLE หลอดไฟสองดวงต่อขนาน
+# ถ่าน 12 V กับหลอด 24 Ω สองดวงต่อขนาน: หลอดละ 0.5 A, แอมมิเตอร์ I อ่าน 1 A, โวลต์มิเตอร์ V_B อ่าน 12 V
+DC  2,10 2,8   E=12
+AM  4,3 6,3    name=I
+B   9,8 9,10   R=24 name=B1
+B   13,8 13,10 R=24 name=B2
+VM  17,8 17,10 name=V_B
+W   2,8 2,3 4,3            # ขั้วบวกไปแอมมิเตอร์
+W   6,3 17,3 17,8          # รางบน
+W   9,3 9,8
+W   13,3 13,8
+W   2,10 2,15 17,15 17,10  # รางล่าง
+W   9,10 9,15
+W   13,10 13,15`;
 const cMsg=t2=>{ $('#cMsg').textContent=t2; };
 function showErrs(list){ const ul=$('#cErr'); ul.innerHTML=''; for (const e of list.slice(0,12)){ const li=document.createElement('li'); li.textContent=e; ul.appendChild(li); }
   if (list.length>12){ const li=document.createElement('li'); li.textContent=`และอีก ${list.length-12} รายการ`; ul.appendChild(li); } }
@@ -1351,8 +1437,8 @@ $('#speed').onchange=e=>{ speed=parseFloat(e.target.value); };
 const setMode=m=>{ elMode=m; $('#mCur').setAttribute('aria-pressed',String(!m)); $('#mEl').setAttribute('aria-pressed',String(m)); };
 $('#mCur').onclick=()=>setMode(false); $('#mEl').onclick=()=>setMode(true);
 
-// the version (with an optional tag, e.g. '1.0.3.0 alpha') is written here and in the name of the version file ("version 1.0.4.0 beta.txt"); change both together
-const VERSION = '1.0.4.0 beta';
+// the version (with an optional tag, e.g. '1.0.3.0 alpha') is written here and in the name of the version file ("version 1.0.4.2 beta.txt"); change both together
+const VERSION = '1.0.4.2 beta';
 { const a=$('#ver'); a.textContent='เวอร์ชัน '+VERSION; a.href=encodeURI('version '+VERSION+'.txt'); a.parentElement.hidden=false; }
 
 /* ---------- sizing + loop ---------- */
