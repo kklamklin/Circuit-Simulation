@@ -8,7 +8,7 @@ It was built to explain electrical physics problems visually (for example Thai P
 
 ## Getting started
 
-Open `index.html` in a browser (keep `style.css` and `app.js` in the same folder). An internet connection is needed to load the fonts. If you enable GitHub Pages for this repository, the simulator can be used straight from a link.
+Open `index.html` in a browser (keep `style.css`, `app.js` and `knowledge.js` in the same folder). An internet connection is needed to load the fonts. If you enable GitHub Pages for this repository, the simulator can be used straight from a link.
 
 ## Features
 
@@ -21,7 +21,9 @@ Open `index.html` in a browser (keep `style.css` and `app.js` in the same folder
 - **Oscilloscope.** Plot voltage and current of the selected component over time.
 - **Text circuit code.** Import and export circuits as plain text, so an AI assistant can write a circuit from a problem statement and you paste it in to build it instantly.
 - **Saved circuits** in the browser, and undo with Ctrl+Z.
-- **Sound.** A click sound on every click, and a notification sound when current starts to flow in the circuit (again whenever it flows after the circuit has gone quiet). The "เสียง" button turns it off.
+- **Sound.** A click sound on every click, and a notification sound when current starts to flow in the circuit (again whenever it flows after the circuit has gone quiet). The "Sound" button turns it off.
+- **Menu (top left, three lines).** A "Components" page explains all 15 parts (symbol, what it does, how it behaves, formulas, settings, ideal and real mode, what to watch out for, and a basic circuit running live on the page). A "Circuits" page explains the basic ideas (nodes, short circuits, KCL, KVL and more) and 13 example circuits with what each meter should read. "Try it on the board" opens that circuit on the main board.
+- **Thai or English.** Thai is the default; choose English in the menu and every text on the page switches. The browser remembers the choice.
 - **Works on phones and tablets.** The whole board fits on the first screen, with the toolbar above it, the component palette beside it (fold it away with the side-panel button), and the controls and readouts below. On phones the effects are lightened automatically so it stays smooth.
 
 ## Components
@@ -49,12 +51,12 @@ Press the keys 1 to 5 to switch tools.
 | Key | Tool | What it does |
 |---|---|---|
 | 1 | Smart (default) | Drag between nodes to wire, drag a component to move it, click to select, click a switch to toggle it |
-| 2 | Select | Click a node or component to edit its values, pause it, or delete it |
+| 2 | Select | Click a node or component to edit its values, disable it, or delete it |
 | 3 | Rotate | Click a component to rotate it 90° clockwise |
 | 4 | Delete | Click a node to delete everything connected there |
 | 5 | Idle | Clicks do nothing |
 
-"Pause" keeps a component or wire on the board but takes it out of the circuit.
+"Disable" keeps a component or wire on the board but takes it out of the circuit.
 
 ## Circuit code (CIRCUIT v1)
 
@@ -89,4 +91,4 @@ The version number has four parts, `major.medium.minor.patch`, for example `1.0.
 
 ## Tech
 
-Plain HTML, CSS and JavaScript split into `index.html` (page structure), `style.css` (styles) and `app.js` (program), with no build step and no external libraries (apart from Google Fonts). The circuit solver uses Modified Nodal Analysis, backward Euler companion models for capacitors and inductors, and Newton-Raphson iteration for diodes and LEDs. The interface is in Thai.
+Plain HTML, CSS and JavaScript split into `index.html` (page structure), `style.css` (styles), `app.js` (program) and `knowledge.js` (the explanations of parts and circuits, in Thai and English), with no build step and no external libraries (apart from Google Fonts). The circuit solver uses Modified Nodal Analysis, backward Euler companion models for capacitors and inductors, and Newton-Raphson iteration for diodes and LEDs. The interface is in Thai or English.

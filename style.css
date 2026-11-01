@@ -198,7 +198,73 @@ button:active{transform:translateY(1px)}
 .menubtn[aria-expanded="true"]{color:var(--accent);border-color:rgba(62,230,192,.45)}
 .menuw{position:fixed;inset:0;z-index:44;background:rgba(2,6,5,.6);animation:fadeIn .15s ease-out}
 .menubox{position:absolute;left:0;top:0;bottom:0;width:min(300px,86vw);background:linear-gradient(var(--panel-hi),var(--panel));border-right:1px solid var(--accent);box-shadow:20px 0 60px rgba(0,0,0,.6);padding:calc(env(safe-area-inset-top,0px) + 14px) 14px 14px calc(env(safe-area-inset-left,0px) + 14px);display:flex;flex-direction:column;gap:10px;overflow-y:auto;animation:menuIn .2s ease-out}
-.menuempty{color:var(--muted);font-size:13px;margin:0}
+.menubody{display:flex;flex-direction:column;gap:8px}
+.mitem{display:flex;align-items:center;gap:12px;text-align:left;padding:10px 12px;border-radius:10px;background:var(--chip)}
+.mitem:hover{border-color:var(--accent)}
+.mitem canvas{width:48px;height:26px;flex:none}
+.mitem span{display:flex;flex-direction:column;min-width:0}
+.mitem b{font-family:var(--f-display);font-weight:600;font-size:16px;line-height:1.3}
+.mitem small{color:var(--muted);font-size:12.5px;line-height:1.35}
+.mlang{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px 10px;margin-top:6px;padding:10px 12px;border:1px solid var(--line);border-radius:10px}
+.mlang b{font-family:var(--f-display);font-weight:600;font-size:15px}
+/* explanation pages (menu: components, circuits) */
+body.noscroll{overflow:hidden}
+.docw{position:fixed;inset:0;z-index:46;display:flex;justify-content:center;background:rgba(2,6,5,.78);animation:fadeIn .15s ease-out}
+.docbox{width:min(840px,100%);height:100%;overflow-y:auto;overscroll-behavior:contain;background:var(--bg);border-inline:1px solid var(--line);padding:0 max(16px,env(safe-area-inset-right,0px)) 40px max(16px,env(safe-area-inset-left,0px))}
+.dochd{position:sticky;top:0;z-index:3;display:flex;align-items:center;gap:10px;padding:calc(env(safe-area-inset-top,0px) + 12px) 0 10px;background:var(--bg);border-bottom:1px solid var(--line)}
+.dochd h2{flex:1;min-width:0;margin:0;font-family:var(--f-display);font-weight:600;font-size:20px;text-align:center;overflow-wrap:anywhere;text-wrap:balance}
+.docbody{padding-top:4px}
+.docbody p{margin:0 0 8px}
+.dlead{color:var(--muted);font-size:14px;margin:12px 0 0!important}
+.dgrp{font-family:var(--f-display);font-weight:500;font-size:13px;letter-spacing:.06em;color:var(--muted);margin:18px 2px 8px}
+.dlist{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:8px}
+.ditem,.citem{display:flex;align-items:center;gap:12px;text-align:left;padding:10px 12px;border-radius:10px;background:linear-gradient(var(--panel-hi),var(--panel))}
+.ditem:hover,.citem:hover{border-color:var(--accent)}
+.ditem canvas{width:64px;height:34px;flex:none}
+.ditem>span,.citem>span{display:flex;flex-direction:column;min-width:0;flex:1}
+.ditem b,.citem b{font-family:var(--f-display);font-weight:600;font-size:15px;line-height:1.3}
+.ditem small,.citem small{color:var(--muted);font-size:12.5px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.code{font-family:var(--f-mono);font-style:normal;font-size:11.5px;color:var(--accent);border:1px solid var(--line);border-radius:5px;padding:0 5px;flex:none}
+.clist2{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:8px}
+.citem{align-items:flex-start}
+.citem canvas{width:124px;height:88px;flex:none;border-radius:6px;border:1px solid var(--line)}
+.citem i{font-style:normal;font-size:12px;color:var(--copper);line-height:1.4}
+.dhead{display:flex;gap:16px;align-items:center;margin:14px 0 4px}
+.dbig{width:140px;height:84px;flex:none;background:linear-gradient(var(--panel-hi),var(--panel));border:1px solid var(--line);border-radius:12px}
+.dkick{font-family:var(--f-mono);font-size:12px;color:var(--accent);margin:0!important;letter-spacing:.02em}
+.dname{font-family:var(--f-display);font-weight:600;font-size:24px;margin:0 0 4px;line-height:1.25}
+.docbody section{margin-top:18px}
+.docbody h4{font-family:var(--f-display);font-weight:600;font-size:15px;margin:0 0 6px;color:var(--ink)}
+.docbody ul{margin:0;padding-left:20px}
+.docbody li{margin:2px 0}
+.fchips{display:flex;flex-wrap:wrap;gap:6px}
+.fchips span{font-family:var(--f-mono);font-size:13px;background:var(--chip);border:1px solid var(--line);border-radius:6px;padding:3px 8px}
+.dtab{width:100%;border-collapse:collapse;font-size:14px}
+.dtab th,.dtab td{border-bottom:1px solid var(--line);padding:6px 8px 6px 0;text-align:left;vertical-align:top}
+.dtab th{color:var(--muted);font-weight:500;font-size:12.5px}
+.dtab td:first-child,.dtab td.num{font-family:var(--f-mono);white-space:nowrap}
+.dmodes{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.dmodes>div,.dtry{background:linear-gradient(var(--panel-hi),var(--panel));border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.dmodes p,.dtry p{margin:0}
+.dtry{border-color:rgba(62,230,192,.35)}
+.dcap{color:var(--muted);font-size:13.5px}
+.mini{position:relative;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--board);margin-top:12px}
+.mini canvas{display:block;width:100%}
+.mini .mre{position:absolute;right:8px;top:8px;padding:3px 10px;font-size:12.5px;background:rgba(13,21,20,.85)}
+.dacts{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.rlist{display:flex;flex-direction:column;gap:6px}
+.rrow{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px;background:linear-gradient(var(--panel-hi),var(--panel));border:1px solid var(--line);border-radius:10px;padding:8px 12px}
+.rrow code{font-family:var(--f-mono);color:var(--accent);font-size:13.5px}
+.rrow b{font-family:var(--f-mono);font-weight:500;font-size:15px}
+.rrow em{font-style:normal;font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:0 8px}
+.rrow small{flex-basis:100%;color:var(--muted);font-size:13px;line-height:1.45}
+@media (max-width:600px){
+  .dmodes{grid-template-columns:1fr}
+  .dbig{width:108px;height:66px}
+  .dname{font-size:21px}
+  .clist2{grid-template-columns:1fr}
+  .citem canvas{width:104px;height:74px}
+}
 @keyframes menuIn{from{transform:translateX(-24px);opacity:0}to{transform:none;opacity:1}}
 @media (prefers-reduced-motion:reduce){.menubox{animation:none}}
 #undo svg{flex:none}

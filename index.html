@@ -13,144 +13,155 @@
 <div class="app">
   <header>
     <div class="brand">
-      <div class="brandtop"><button id="menuBtn" class="menubtn" aria-controls="menuPanel" aria-expanded="false" aria-label="เมนู" title="เมนู"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
-      <h1>แผงต่อวงจร<em>ไฟฟ้า</em></h1></div>
-      <p class="sub">ลากอุปกรณ์มาวาง ต่อสายไฟ ดูกระแส ความร้อน และพลังงาน ถ้าใช้เกินพิกัด อุปกรณ์จะไหม้หรือระเบิด</p>
+      <div class="brandtop"><button id="menuBtn" class="menubtn" aria-controls="menuPanel" aria-expanded="false" aria-label="เมนู" title="เมนู" data-en-aria-label="Menu" data-en-title="Menu"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+      <h1 data-en="Circuit &lt;em&gt;Simulation&lt;/em&gt;">แผงต่อวงจร<em>ไฟฟ้า</em></h1></div>
+      <p class="sub" data-en="Drag parts onto the board, wire them up, and watch current, heat and energy. Push a part past its rating and it burns out or explodes.">ลากอุปกรณ์มาวาง ต่อสายไฟ ดูกระแส ความร้อน และพลังงาน ถ้าใช้เกินพิกัด อุปกรณ์จะไหม้หรือระเบิด</p>
       <div class="live" id="live">LIVE · t 0.00 s</div>
     </div>
     <div class="bar">
-      <select id="preset" aria-label="วงจรตัวอย่าง">
-        <option value="">โหลดวงจรตัวอย่าง…</option>
-        <option value="flash">ไฟฉาย + มิเตอร์</option>
-        <option value="rc">ชาร์จตัวเก็บประจุ (RC)</option>
-        <option value="rect">ไดโอดเรียงกระแสครึ่งคลื่น (AC)</option>
-        <option value="par">หลอดไฟต่อขนาน</option>
-        <option value="led">LED กับตัวต้านทาน</option>
-        <option value="trans">หม้อแปลง 1:2 พร้อมโหลด (AC)</option>
-        <option value="boom">ตัวต้านทานเกินพิกัด (ระเบิด)</option>
-        <option value="fuse">ฟิวส์ป้องกันลัดวงจร</option>
-        <option value="short">ลัดวงจรถ่าน (ไม่มีฟิวส์)</option>
+      <select id="preset" aria-label="วงจรตัวอย่าง" data-en-aria-label="Example circuits">
+        <option value="" data-en="Load an example circuit…">โหลดวงจรตัวอย่าง…</option>
+        <option value="flash" data-en="Flashlight + meters">ไฟฉาย + มิเตอร์</option>
+        <option value="rc" data-en="Charging a capacitor (RC)">ชาร์จตัวเก็บประจุ (RC)</option>
+        <option value="rect" data-en="Half-wave diode rectifier (AC)">ไดโอดเรียงกระแสครึ่งคลื่น (AC)</option>
+        <option value="par" data-en="Bulbs in parallel">หลอดไฟต่อขนาน</option>
+        <option value="led" data-en="LED with a resistor">LED กับตัวต้านทาน</option>
+        <option value="trans" data-en="1:2 transformer with a load (AC)">หม้อแปลง 1:2 พร้อมโหลด (AC)</option>
+        <option value="boom" data-en="Overloaded resistor (explodes)">ตัวต้านทานเกินพิกัด (ระเบิด)</option>
+        <option value="fuse" data-en="A fuse against a short circuit">ฟิวส์ป้องกันลัดวงจร</option>
+        <option value="short" data-en="Shorted battery (no fuse)">ลัดวงจรถ่าน (ไม่มีฟิวส์)</option>
       </select>
-      <div class="seg" role="group" aria-label="แสดงการไหล">
-        <button id="mCur" aria-pressed="true">ทิศกระแส</button>
-        <button id="mEl" aria-pressed="false">อิเล็กตรอน</button>
+      <div class="seg" role="group" aria-label="แสดงการไหล" data-en-aria-label="Flow display">
+        <button id="mCur" aria-pressed="true" data-en="Current">ทิศกระแส</button>
+        <button id="mEl" aria-pressed="false" data-en="Electrons">อิเล็กตรอน</button>
       </div>
-      <select id="speed" aria-label="ความเร็วเวลา">
-        <option value="0.1">เวลา 0.1×</option>
-        <option value="0.25">เวลา 0.25×</option>
-        <option value="0.5">เวลา 0.5×</option>
-        <option value="1" selected>เวลา 1×</option>
+      <select id="speed" aria-label="ความเร็วเวลา" data-en-aria-label="Time speed">
+        <option value="0.1" data-en="Speed 0.1×">เวลา 0.1×</option>
+        <option value="0.25" data-en="Speed 0.25×">เวลา 0.25×</option>
+        <option value="0.5" data-en="Speed 0.5×">เวลา 0.5×</option>
+        <option value="1" selected data-en="Speed 1×">เวลา 1×</option>
       </select>
-      <button id="ideal" aria-pressed="true" title="อุดมคติ: แหล่งจ่ายไม่มีความต้านทานภายใน แอมมิเตอร์ สวิตช์ และฟิวส์ไม่มีความต้านทาน โวลต์มิเตอร์ไม่ดึงกระแส ไดโอดไม่มีแรงดันตก อุปกรณ์ไม่ร้อนและไม่ไหม้">วงจรอุดมคติ: เปิด</button>
+      <button id="ideal" aria-pressed="true" title="อุดมคติ: แหล่งจ่ายไม่มีความต้านทานภายใน แอมมิเตอร์ สวิตช์ และฟิวส์ไม่มีความต้านทาน โวลต์มิเตอร์ไม่ดึงกระแส ไดโอดไม่มีแรงดันตก อุปกรณ์ไม่ร้อนและไม่ไหม้" data-en-title="Ideal: sources have no internal resistance; ammeters, switches and fuses have no resistance; voltmeters draw no current; diodes have no voltage drop; nothing heats up or burns">วงจรอุดมคติ: เปิด</button>
       <button id="play">หยุดชั่วคราว</button>
       <button id="heat" aria-pressed="true">ความร้อน: แสดง</button>
       <button id="lbl" aria-pressed="true">ป้ายบนวงจร: แสดง</button>
-      <button id="snd" aria-pressed="true" title="เสียงคลิก และเสียงแจ้งเมื่อวงจรมีไฟไหล">เสียง: เปิด</button>
-      <button id="saveBtn" aria-expanded="false">บันทึก / เปิดวงจร</button>
-      <button id="codeBtn" aria-expanded="false">โค้ดวงจร</button>
-      <button id="reset">เริ่มเวลาใหม่</button>
-      <button id="fixall" class="danger">ซ่อมทั้งหมด</button>
-      <button id="clearW">ล้างสายไฟ</button>
-      <button id="clear">ล้างแผง</button>
+      <button id="snd" aria-pressed="true" title="เสียงคลิก และเสียงแจ้งเมื่อวงจรมีไฟไหล" data-en-title="Click sounds, and a chime when current starts to flow">เสียง: เปิด</button>
+      <button id="saveBtn" aria-expanded="false" data-en="Save / open">บันทึก / เปิดวงจร</button>
+      <button id="codeBtn" aria-expanded="false" data-en="Circuit code">โค้ดวงจร</button>
+      <button id="reset" data-en="Restart time">เริ่มเวลาใหม่</button>
+      <button id="fixall" class="danger" data-en="Repair all">ซ่อมทั้งหมด</button>
+      <button id="clearW" data-en="Clear wires">ล้างสายไฟ</button>
+      <button id="clear" data-en="Clear board">ล้างแผง</button>
     </div>
   </header>
 
   <div id="menuPanel" class="menuw" hidden>
-  <nav class="menubox" role="dialog" aria-label="เมนู">
-    <div class="chd"><h2>เมนู</h2><button id="menuClose" class="xbtn" aria-label="ปิด" title="ปิด"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></div>
-    <div class="menubody"><p class="menuempty">ยังไม่มีรายการ</p></div>
+  <nav class="menubox" role="dialog" aria-label="เมนู" data-en-aria-label="Menu">
+    <div class="chd"><h2 data-en="Menu">เมนู</h2><button id="menuClose" class="xbtn" aria-label="ปิด" title="ปิด" data-en-aria-label="Close" data-en-title="Close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></div>
+    <div class="menubody">
+      <button class="mitem" data-go="devs"><canvas width="96" height="52" aria-hidden="true"></canvas><span><b data-en="Components">อุปกรณ์</b><small data-en="Every part on the board: what it does, how it behaves, a basic circuit">อุปกรณ์ทุกชิ้นบนแผง ทำอะไร พฤติกรรม และวงจรพื้นฐาน</small></span></button>
+      <button class="mitem" data-go="circs"><canvas width="96" height="52" aria-hidden="true"></canvas><span><b data-en="Circuits">วงจร</b><small data-en="Kinds of circuits, and ideas like nodes and short circuits">วงจรแบบต่างๆ และแนวคิดอย่างโหนดกับวงจรลัด</small></span></button>
+      <div class="mlang"><b data-en="Language">ภาษา</b><div class="seg" role="group" aria-label="ภาษา" data-en-aria-label="Language"><button data-lang="th" aria-pressed="true">ไทย</button><button data-lang="en" aria-pressed="false">English</button></div></div>
+    </div>
   </nav>
 </div>
+  <div id="docPage" class="docw" hidden>
+    <div class="docbox" role="dialog" aria-modal="true" aria-labelledby="docTitle">
+      <div class="dochd"><button id="docBack" class="xbtn" aria-label="ย้อนกลับ" title="ย้อนกลับ" data-en-aria-label="Back" data-en-title="Back"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button><h2 id="docTitle"></h2><button id="docClose" class="xbtn" aria-label="ปิด" title="ปิด" data-en-aria-label="Close" data-en-title="Close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></div>
+      <div id="docBody" class="docbody"></div>
+    </div>
+  </div>
   <div id="confirm" class="modal" hidden>
     <div class="mbox" role="alertdialog" aria-modal="true" aria-labelledby="qTitle" aria-describedby="qMsg">
-      <p class="kicker">ยืนยันก่อนดำเนินการ</p>
+      <p class="kicker" data-en="Please confirm">ยืนยันก่อนดำเนินการ</p>
       <h2 id="qTitle"></h2>
       <p id="qMsg"></p>
-      <div class="bar"><button id="cNo">ยกเลิก</button><button id="cOk">ยืนยัน</button></div>
+      <div class="bar"><button id="cNo" data-en="Cancel">ยกเลิก</button><button id="cOk">ยืนยัน</button></div>
     </div>
   </div>
   <div id="toastf" class="toastf" role="status" aria-live="polite" hidden><span id="tKick"></span><b id="tText"></b></div>
 
   <div id="savePanel" class="card savep" hidden>
-    <h2 style="margin:0 0 8px;font-family:var(--f-display);font-weight:500;font-size:13px;letter-spacing:.06em;color:var(--muted)">วงจรที่บันทึกไว้ในเบราว์เซอร์นี้</h2>
-    <div class="saverow"><input id="sName" maxlength="40" placeholder="วงจรไฟฉายของฉัน" aria-label="ชื่อวงจร"><button id="sSave">บันทึกวงจรนี้</button><button id="sClose">ปิด</button></div>
+    <h2 style="margin:0 0 8px;font-family:var(--f-display);font-weight:500;font-size:13px;letter-spacing:.06em;color:var(--muted)" data-en="Circuits saved in this browser">วงจรที่บันทึกไว้ในเบราว์เซอร์นี้</h2>
+    <div class="saverow"><input id="sName" maxlength="40" placeholder="วงจรไฟฉายของฉัน" aria-label="ชื่อวงจร" data-en-placeholder="My flashlight circuit" data-en-aria-label="Circuit name"><button id="sSave" data-en="Save this circuit">บันทึกวงจรนี้</button><button id="sClose" data-en="Close">ปิด</button></div>
     <p id="sMsg" class="desc" style="margin:6px 0 0"></p>
     <ul id="sList" class="slist"></ul>
   </div>
 
   <div id="codePanel" class="modal codem" hidden>
     <div class="mbox cbox savep" role="dialog" aria-modal="true" aria-labelledby="cHead">
-      <div class="chd"><h2 id="cHead">นำเข้าโค้ดวงจร</h2><button id="cClose" class="xbtn" aria-label="ปิด" title="ปิด"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></div>
-      <div class="clab"><label for="cPrompt">พร็อมต์ให้ AI เขียนโค้ดจากรูปวงจร (ภาษาอังกฤษ)</label><button id="cPromptCopy" class="cpy" title="คัดลอกพร็อมต์"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span>คัดลอก</span></button></div>
+      <div class="chd"><h2 id="cHead" data-en="Import circuit code">นำเข้าโค้ดวงจร</h2><button id="cClose" class="xbtn" aria-label="ปิด" title="ปิด" data-en-aria-label="Close" data-en-title="Close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></div>
+      <div class="clab"><label for="cPrompt" data-en="Prompt that lets an AI write the code from a circuit picture">พร็อมต์ให้ AI เขียนโค้ดจากรูปวงจร (ภาษาอังกฤษ)</label><button id="cPromptCopy" class="cpy" title="คัดลอกพร็อมต์" data-en-title="Copy the prompt"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span data-en="Copy">คัดลอก</span></button></div>
       <textarea id="cPrompt" readonly spellcheck="false"></textarea>
-      <p class="desc chint">คัดลอกพร็อมต์ไปวางในแชต AI พร้อมแนบรูปวงจร แล้วนำโค้ดที่ได้มาวางในช่องด้านล่าง</p>
-      <label for="cCode" class="clab">โค้ดวงจร</label>
-      <textarea id="cCode" spellcheck="false" placeholder="วางโค้ดที่ได้จาก AI ที่นี่ ขึ้นต้นด้วย CIRCUIT v1 …"></textarea>
+      <p class="desc chint" data-en="Paste the prompt into an AI chat together with a picture of the circuit, then paste the code it gives you below.">คัดลอกพร็อมต์ไปวางในแชต AI พร้อมแนบรูปวงจร แล้วนำโค้ดที่ได้มาวางในช่องด้านล่าง</p>
+      <label for="cCode" class="clab" data-en="Circuit code">โค้ดวงจร</label>
+      <textarea id="cCode" spellcheck="false" placeholder="วางโค้ดที่ได้จาก AI ที่นี่ ขึ้นต้นด้วย CIRCUIT v1 …" data-en-placeholder="Paste the code from the AI here, starting with CIRCUIT v1 …"></textarea>
       <p id="cMsg" class="desc" style="margin:0"></p>
       <ul id="cErr" class="errs"></ul>
-      <div class="csub"><button id="cImport" class="primary">นำเข้าวงจร</button></div>
-      <div class="cmore"><button id="cExport">ดึงโค้ดจากวงจรบนแผง</button><button id="cCopy">คัดลอกโค้ด</button><button id="cSample">ใส่ตัวอย่าง</button></div>
-      <details class="cheatd"><summary>สรุปรูปแบบโค้ด</summary>
+      <div class="csub"><button id="cImport" class="primary" data-en="Import circuit">นำเข้าวงจร</button></div>
+      <div class="cmore"><button id="cExport" data-en="Take code from the board">ดึงโค้ดจากวงจรบนแผง</button><button id="cCopy" data-en="Copy code">คัดลอกโค้ด</button><button id="cSample" data-en="Insert example">ใส่ตัวอย่าง</button></div>
+      <details class="cheatd"><summary data-en="Code format summary">สรุปรูปแบบโค้ด</summary>
       <div class="cheat">
-        <span><b>DC</b> a b E= Pmax=</span><span><b>AC</b> a b E= f= Pmax=</span><span><b>R</b> a b R= Pmax=</span><span><b>B</b> a b R= Pmax=  (หลอดไฟ)</span>
-        <span><b>S</b> a b on=1|0 Pmax=</span><span><b>F</b> a b Imax=  (ฟิวส์)</span><span><b>C</b> a b C=(µF) Vmax=</span><span><b>L</b> a b L=(H) Imax=</span>
-        <span><b>D</b> a b Pmax=  (ไดโอด a→b)</span><span><b>LED</b> a b color= Pmax=</span><span><b>VM</b> a b  (อ่าน Va−Vb)</span><span><b>AM</b> a b  (อ่านกระแส a→b)</span>
-        <span><b>TP</b> a b grp= L= n= k= Imax=  (ขดปฐมภูมิ)</span><span><b>TS</b> a b grp= Imax=  (ขดทุติยภูมิ)</span><span><b>GND</b> a b  (กราว ต่อที่ขา a)</span>
-        <span><b>W</b> x,y x,y …  (สายไฟหลายจุด)</span><span>ทุกชิ้นใส่ <b>name=</b> ได้</span><span>DC, AC: ขั้วบวกคือจุด b</span><span>ขาอุปกรณ์ห่างกัน 2 ช่องเสมอ</span>
+        <span><b>DC</b> a b E= Pmax=</span><span><b>AC</b> a b E= f= Pmax=</span><span><b>R</b> a b R= Pmax=</span><span data-en="&lt;b&gt;B&lt;/b&gt; a b R= Pmax=  (bulb)"><b>B</b> a b R= Pmax=  (หลอดไฟ)</span>
+        <span><b>S</b> a b on=1|0 Pmax=</span><span data-en="&lt;b&gt;F&lt;/b&gt; a b Imax=  (fuse)"><b>F</b> a b Imax=  (ฟิวส์)</span><span><b>C</b> a b C=(µF) Vmax=</span><span><b>L</b> a b L=(H) Imax=</span>
+        <span data-en="&lt;b&gt;D&lt;/b&gt; a b Pmax=  (diode a→b)"><b>D</b> a b Pmax=  (ไดโอด a→b)</span><span><b>LED</b> a b color= Pmax=</span><span data-en="&lt;b&gt;VM&lt;/b&gt; a b  (reads Va−Vb)"><b>VM</b> a b  (อ่าน Va−Vb)</span><span data-en="&lt;b&gt;AM&lt;/b&gt; a b  (reads current a→b)"><b>AM</b> a b  (อ่านกระแส a→b)</span>
+        <span data-en="&lt;b&gt;TP&lt;/b&gt; a b grp= L= n= k= Imax=  (primary coil)"><b>TP</b> a b grp= L= n= k= Imax=  (ขดปฐมภูมิ)</span><span data-en="&lt;b&gt;TS&lt;/b&gt; a b grp= Imax=  (secondary coil)"><b>TS</b> a b grp= Imax=  (ขดทุติยภูมิ)</span><span data-en="&lt;b&gt;GND&lt;/b&gt; a b  (ground, connect leg a)"><b>GND</b> a b  (กราว ต่อที่ขา a)</span>
+        <span data-en="&lt;b&gt;W&lt;/b&gt; x,y x,y …  (wire through several points)"><b>W</b> x,y x,y …  (สายไฟหลายจุด)</span><span data-en="Any part can have &lt;b&gt;name=&lt;/b&gt;">ทุกชิ้นใส่ <b>name=</b> ได้</span><span data-en="DC, AC: positive terminal is point b">DC, AC: ขั้วบวกคือจุด b</span><span data-en="Part legs are always 2 cells apart">ขาอุปกรณ์ห่างกัน 2 ช่องเสมอ</span>
       </div></details>
     </div>
   </div>
 
   <div class="main">
     <aside class="palette" id="palette">
-      <h2>อุปกรณ์ · ลากไปวาง หรือแตะแล้วแตะแผง</h2>
+      <h2 data-en="Parts · drag to place, or tap then tap the board">อุปกรณ์ · ลากไปวาง หรือแตะแล้วแตะแผง</h2>
     </aside>
 
     <section class="boardwrap" id="wrap">
-      <div class="ctitle"><span>CIRCUIT</span><input id="cTitle" maxlength="60" aria-label="ชื่อวงจร แก้ไขได้" value="วงจรของฉัน"></div>
-      <div class="tools" role="toolbar" aria-label="เครื่องมือบนแผง">
-        <button id="palBtn" class="palbtn" aria-controls="palette" aria-expanded="true" aria-label="แถบอุปกรณ์" title="ย่อหรือขยายแถบอุปกรณ์"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M10 5v14" fill="none" stroke="currentColor" stroke-width="2"/></svg></button>
+      <div class="ctitle"><span>CIRCUIT</span><input id="cTitle" maxlength="60" aria-label="ชื่อวงจร แก้ไขได้" data-en-aria-label="Circuit name, editable" value="วงจรของฉัน"></div>
+      <div class="tools" role="toolbar" aria-label="เครื่องมือบนแผง" data-en-aria-label="Board tools">
+        <button id="palBtn" class="palbtn" aria-controls="palette" aria-expanded="true" aria-label="แถบอุปกรณ์" title="ย่อหรือขยายแถบอุปกรณ์" data-en-aria-label="Parts bar" data-en-title="Fold or unfold the parts bar"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M10 5v14" fill="none" stroke="currentColor" stroke-width="2"/></svg></button>
         <div class="seg" id="toolSeg">
-          <button data-tool="smart" aria-pressed="true" title="แบบเดิม: ลากจุดเพื่อต่อสาย ลากอุปกรณ์เพื่อย้าย แตะเพื่อเลือก แตะสวิตช์เพื่อเปิดปิด">อัจฉริยะ <kbd>1</kbd></button>
-          <button data-tool="select" aria-pressed="false" title="คลิกที่จุดหรืออุปกรณ์เพื่อปรับค่า พัก หรือลบ">เลือก <kbd>2</kbd></button>
-          <button data-tool="rotate" aria-pressed="false" title="คลิกอุปกรณ์เพื่อหมุนตามเข็มนาฬิกา 90°">หมุน <kbd>3</kbd></button>
-          <button data-tool="delete" aria-pressed="false" title="คลิกที่จุดเพื่อลบทุกอย่างที่ต่ออยู่ตรงนั้น">ลบ <kbd>4</kbd></button>
-          <button data-tool="idle" aria-pressed="false" title="คลิกบนแผงแล้วไม่มีอะไรเปลี่ยน">ว่าง <kbd>5</kbd></button>
+          <button data-tool="smart" aria-pressed="true" title="แบบเดิม: ลากจุดเพื่อต่อสาย ลากอุปกรณ์เพื่อย้าย แตะเพื่อเลือก แตะสวิตช์เพื่อเปิดปิด" data-en-title="Drag nodes to wire, drag parts to move, tap to select, tap a switch to flip it" data-en="Smart &lt;kbd&gt;1&lt;/kbd&gt;">อัจฉริยะ <kbd>1</kbd></button>
+          <button data-tool="select" aria-pressed="false" title="คลิกที่จุดหรืออุปกรณ์เพื่อปรับค่า พัก หรือลบ" data-en-title="Click a node or part to edit, disable or delete it" data-en="Select &lt;kbd&gt;2&lt;/kbd&gt;">เลือก <kbd>2</kbd></button>
+          <button data-tool="rotate" aria-pressed="false" title="คลิกอุปกรณ์เพื่อหมุนตามเข็มนาฬิกา 90°" data-en-title="Click a part to rotate it 90° clockwise" data-en="Rotate &lt;kbd&gt;3&lt;/kbd&gt;">หมุน <kbd>3</kbd></button>
+          <button data-tool="delete" aria-pressed="false" title="คลิกที่จุดเพื่อลบทุกอย่างที่ต่ออยู่ตรงนั้น" data-en-title="Click a node to delete everything connected there" data-en="Delete &lt;kbd&gt;4&lt;/kbd&gt;">ลบ <kbd>4</kbd></button>
+          <button data-tool="idle" aria-pressed="false" title="คลิกบนแผงแล้วไม่มีอะไรเปลี่ยน" data-en-title="Clicking the board changes nothing" data-en="Idle &lt;kbd&gt;5&lt;/kbd&gt;">ว่าง <kbd>5</kbd></button>
         </div>
-        <button id="undo" title="ย้อนกลับ (Ctrl+Z)" aria-label="ย้อนกลับ"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M9 4 4 9l5 5M4 9h10a6 6 0 0 1 0 12h-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>ย้อนกลับ</span></button>
+        <button id="undo" title="ย้อนกลับ (Ctrl+Z)" aria-label="ย้อนกลับ" data-en-title="Undo (Ctrl+Z)" data-en-aria-label="Undo"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M9 4 4 9l5 5M4 9h10a6 6 0 0 1 0 12h-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-en="Undo">ย้อนกลับ</span></button>
       </div>
       <div class="stage" id="stage">
-        <canvas id="board" aria-label="แผงโนดสำหรับต่อวงจร"></canvas>
-        <div id="pop" class="pop" role="dialog" aria-label="จัดการสิ่งที่เลือก" hidden></div>
+        <canvas id="board" aria-label="แผงโนดสำหรับต่อวงจร" data-en-aria-label="Node board for building circuits"></canvas>
+        <div id="pop" class="pop" role="dialog" aria-label="จัดการสิ่งที่เลือก" data-en-aria-label="Selected items" hidden></div>
       </div>
       <div class="vhead"><b id="vTitle">อุปกรณ์บนแผง</b><span id="vSub">t = 0.00 s</span></div>
       <div id="clist" class="clist"></div>
       <div id="status"></div>
-      <div id="warn" hidden>กระแสสูงผิดปกติ วงจรอาจลัดวงจร ลองเพิ่มตัวต้านทานในเส้นทางนั้น</div>
+      <div id="warn" hidden data-en="Unusually large current: the circuit may be shorted. Try adding a resistor in that path.">กระแสสูงผิดปกติ วงจรอาจลัดวงจร ลองเพิ่มตัวต้านทานในเส้นทางนั้น</div>
     </section>
 
     <aside class="side">
       <div class="card" id="insp"></div>
       <div class="card">
-        <h2 style="margin:0 0 8px">ออสซิลโลสโคป · อุปกรณ์ที่เลือก</h2>
+        <h2 style="margin:0 0 8px" data-en="Oscilloscope · selected part">ออสซิลโลสโคป · อุปกรณ์ที่เลือก</h2>
         <canvas id="scope"></canvas>
-        <div class="legend"><span><i style="background:var(--copper)"></i>แรงดัน <span id="sV">–</span></span><span><i style="background:var(--electron)"></i>กระแส <span id="sI">–</span></span></div>
+        <div class="legend"><span><i style="background:var(--copper)"></i><span data-en="Voltage">แรงดัน</span> <span id="sV">–</span></span><span><i style="background:var(--electron)"></i><span data-en="Current">กระแส</span> <span id="sI">–</span></span></div>
       </div>
       <div class="card">
-        <h2 style="margin:0 0 8px">พลังงานในวงจร</h2>
-        <div class="erow"><span>แหล่งจ่ายให้พลังงานไปแล้ว</span><b id="eSup">0 J</b></div>
-        <div class="erow"><span>กลายเป็นความร้อนและแสง</span><b id="eHeat">0 J</b></div>
-        <div class="erow"><span>สะสมใน C และ L ตอนนี้</span><b id="eSto">0 J</b></div>
-        <div class="erow"><span>กำลังที่จ่ายขณะนี้</span><b id="pNow">0 W</b></div>
+        <h2 style="margin:0 0 8px" data-en="Energy in the circuit">พลังงานในวงจร</h2>
+        <div class="erow"><span data-en="Energy supplied so far">แหล่งจ่ายให้พลังงานไปแล้ว</span><b id="eSup">0 J</b></div>
+        <div class="erow"><span data-en="Turned into heat and light">กลายเป็นความร้อนและแสง</span><b id="eHeat">0 J</b></div>
+        <div class="erow"><span data-en="Stored in C and L now">สะสมใน C และ L ตอนนี้</span><b id="eSto">0 J</b></div>
+        <div class="erow"><span data-en="Power supplied now">กำลังที่จ่ายขณะนี้</span><b id="pNow">0 W</b></div>
         <div class="ebar" aria-hidden="true"><span id="bHeat" style="background:var(--heat);width:0"></span><span id="bSto" style="background:var(--accent);width:0"></span></div>
-        <p class="desc" style="margin:0">กฎอนุรักษ์พลังงาน: พลังงานที่จ่าย = ความร้อนและแสง + พลังงานที่สะสม แถบสีแดงคือส่วนที่กลายเป็นความร้อน สีน้ำเงินคือส่วนที่ยังสะสมอยู่</p>
+        <p class="desc" style="margin:0" data-en="Conservation of energy: energy supplied = heat and light + energy stored. The red bar is the part that became heat, the blue bar the part still stored.">กฎอนุรักษ์พลังงาน: พลังงานที่จ่าย = ความร้อนและแสง + พลังงานที่สะสม แถบสีแดงคือส่วนที่กลายเป็นความร้อน สีน้ำเงินคือส่วนที่ยังสะสมอยู่</p>
         <ul id="log" aria-live="polite"></ul>
       </div>
     </aside>
   </div>
-  <p class="ver" hidden><a id="ver" href="#" target="_blank" rel="noopener" title="ดูบันทึกการแก้ไข"></a></p>
+  <p class="ver" hidden><a id="ver" href="#" target="_blank" rel="noopener" title="ดูบันทึกการแก้ไข" data-en-title="See the change log"></a></p>
 </div>
 
+<script src="knowledge.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
