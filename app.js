@@ -525,13 +525,13 @@ function fmt(v, unit){
 const flowSpeed = i => { const a=Math.abs(i); if (a<1e-6) return 0; return Math.sign(i)*1.6*Math.min(5, Math.cbrt(a/0.01)); };
 const P = g => (g+0.5)*u;
 
-// moving dots along a wire or part; Px/Py turn grid coordinates into pixels, uu is one grid cell
-function flowDots(x, el, color, Px, Py, uu){
+// moving dots along a wire or part; Px/Py turn grid coordinates into pixels, uu is one grid cell, k scales the dots
+function flowDots(x, el, color, Px, Py, uu, k=1){
   if (Math.abs(el.i)<1e-6) return;
   const ax=Px(el.ax), ay=Py(el.ay), bx=Px(el.bx), by=Py(el.by), len=Math.hypot(bx-ax,by-ay); if (!len) return;
   const sp=0.5*uu, ph=(elMode?-el.phase:el.phase)*uu, off=((ph%sp)+sp)%sp;
   x.save(); x.globalCompositeOperation='lighter'; x.fillStyle=color;
-  const r=Math.max(2,uu*0.09), dx=(bx-ax)/len, dy=(by-ay)/len, dir=Math.sign(elMode?-el.i:el.i);
+  const r=Math.max(2,uu*0.09)*k, dx=(bx-ax)/len, dy=(by-ay)/len, dir=Math.sign(elMode?-el.i:el.i);
   for (let d=off; d<len; d+=sp){ const q=d/len, px=ax+(bx-ax)*q, py=ay+(by-ay)*q;
     x.globalAlpha=0.18; x.beginPath(); x.arc(px,py,r*2.6,0,7); x.fill();
     x.globalAlpha=0.35; x.beginPath(); x.arc(px-dx*dir*r*1.6,py-dy*dir*r*1.6,r*0.8,0,7); x.fill();
@@ -995,7 +995,9 @@ function deleteSel(){
 document.addEventListener('keydown', e => {
   if (!$('#confirm').hidden && e.key!=='Escape') return;
   if ($('#confirm').hidden){
-    if (!docPage.hidden){ if (e.key==='Escape') docBack(); return; }
+    if (!docPage.hidden){ if (e.key==='Escape') docBack();
+      else if (les && (e.key==='ArrowRight'||e.key==='ArrowLeft') && !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName) && !e.altKey){ e.preventDefault(); lessonGo(les.at+(e.key==='ArrowRight'?1:-1), true); }
+      return; }
     if (!menuPanel.hidden){ if (e.key==='Escape') closeMenu(); return; }
     if (!$('#codePanel').hidden){ if (e.key==='Escape') closeCode(); return; }
   }
@@ -1297,14 +1299,18 @@ function renderSaves(){
 }
 $('#saveBtn').onclick=e=>{ const p=$('#savePanel'); p.hidden=!p.hidden; e.target.setAttribute('aria-expanded',String(!p.hidden)); if (!p.hidden){ renderSaves(); sMsg(''); $('#sName').value=circuitName; $('#sName').focus(); } };
 $('#sClose').onclick=()=>{ $('#savePanel').hidden=true; $('#saveBtn').setAttribute('aria-expanded','false'); };
-$('#sSave').onclick=()=>{
-  const name=$('#sName').value.trim();
-  if (!name){ sMsg(L('ใส่ชื่อวงจรก่อนบันทึก','Type a name before saving')); $('#sName').focus(); return; }
-  if (!comps.length && !wires.length){ sMsg(L('แผงยังว่างอยู่ ยังไม่มีอะไรให้บันทึก','The board is empty, there is nothing to save')); return; }
+// save the circuit on the board under a name (asks before overwriting one with the same name); say() shows the result, done() runs after saving
+function saveAs(raw, say, done){
+  const name=String(raw||'').trim();
+  if (!name){ say(L('ใส่ชื่อวงจรก่อนบันทึก','Type a name before saving')); return false; }
+  if (!comps.length && !wires.length){ say(L('แผงยังว่างอยู่ ยังไม่มีอะไรให้บันทึก','The board is empty, there is nothing to save')); return false; }
   const doSave=()=>{ setCircuit(name); save(); const a=getSaves().filter(x=>x.name!==name); a.unshift({name,time:Date.now(),data:serialize()});
-    sMsg(putSaves(a) ? L(`บันทึก "${name}" แล้ว`,`Saved "${name}"`) : L('บันทึกไม่ได้ เบราว์เซอร์นี้ไม่อนุญาตให้เก็บข้อมูล ลองใช้โค้ดวงจรแทน','Could not save: this browser does not allow storage. Use the circuit code instead')); renderSaves(); };
+    const ok=putSaves(a); if (!$('#savePanel').hidden) renderSaves(); if (done) done();
+    say(ok ? L(`บันทึก "${name}" แล้ว`,`Saved "${name}"`) : L('บันทึกไม่ได้ เบราว์เซอร์นี้ไม่อนุญาตให้เก็บข้อมูล ลองใช้โค้ดวงจรแทน','Could not save: this browser does not allow storage. Use the circuit code instead')); };
   if (getSaves().some(x=>x.name===name)) askConfirm(L(`มีวงจรชื่อ "${name}" อยู่แล้ว บันทึกทับใช่ไหม`,`A circuit named "${name}" already exists. Overwrite it?`), L('บันทึกทับ','Overwrite'), doSave); else doSave();
-};
+  return true;
+}
+$('#sSave').onclick=()=>{ if (!saveAs($('#sName').value, sMsg) && !$('#sName').value.trim()) $('#sName').focus(); };
 /* ---------- circuit code (text netlist) ---------- */
 const CODE_T = { DC:'dc', AC:'ac', R:'res', B:'bulb', S:'sw', F:'fuse', C:'cap', L:'ind', TP:'tp', TS:'ts', GND:'gnd', D:'diode', LED:'led', VM:'vm', AM:'am' };
 const TYPE_CODE = Object.fromEntries(Object.entries(CODE_T).map(([k,v])=>[v,k]));
@@ -1519,8 +1525,8 @@ $('#speed').onchange=e=>{ speed=parseFloat(e.target.value); };
 const setMode=m=>{ elMode=m; $('#mCur').setAttribute('aria-pressed',String(!m)); $('#mEl').setAttribute('aria-pressed',String(m)); };
 $('#mCur').onclick=()=>setMode(false); $('#mEl').onclick=()=>setMode(true);
 
-// the version (with an optional tag, e.g. '1.0.3.0 alpha') is written here and in the name of the version file ("version 1.1.1.0 alpha.txt"); change both together
-const VERSION = '1.1.1.0 alpha';
+// the version (with an optional tag, e.g. '1.0.3.0 alpha') is written here and in the name of the version file ("version 2.0.0.0 alpha.txt"); change both together
+const VERSION = '2.0.0.0 alpha';
 const verLabel = () => { const a=$('#ver'); a.textContent=L('เวอร์ชัน ','Version ')+VERSION; a.href=encodeURI('version '+VERSION+'.txt'); a.parentElement.hidden=false; };
 verLabel();
 
@@ -1604,10 +1610,82 @@ W   9,8 9,9 2,9 2,7`},
 };
 // circuit drawn above each idea on the circuits page
 const CON_FIG = { node:'circ:mixed', ground:'dev:gnd', kcl:'circ:parallel', kvl:'circ:series', open:'circ:open_switch', short:'circ:short_resistor', series_parallel:'circ:mixed', ideal_real:'circ:short_source' };
-// 'circ:id' or 'dev:id' -> {code, title, cap, ref, key}
+// circuit plans (menu "แปลนวงจร"): ready-made circuits grouped by topic. A plan is either one of PRESETS or a CIRCUIT v1 code,
+// with its lesson texts: desc, idea (why it works), try (a change to predict) and a quiz whose first option is the right one (shown shuffled)
+const PLAN_CAT = [{"id": "dc", "title": {"th": "ไฟตรงพื้นฐาน", "en": "DC basics"}}, {"id": "net", "title": {"th": "อนุกรมและขนาน", "en": "Series and parallel"}}, {"id": "meter", "title": {"th": "มิเตอร์", "en": "Meters"}}, {"id": "switch", "title": {"th": "สวิตช์", "en": "Switches"}}, {"id": "store", "title": {"th": "ตัวเก็บประจุและตัวเหนี่ยวนำ", "en": "Capacitors and inductors"}}, {"id": "ac", "title": {"th": "ไฟสลับ", "en": "AC"}}, {"id": "semi", "title": {"th": "ไดโอดและ LED", "en": "Diodes and LEDs"}}, {"id": "tr", "title": {"th": "หม้อแปลง", "en": "Transformers"}}, {"id": "real", "title": {"th": "โหมดจริง: ร้อน ไหม้ ระเบิด", "en": "Real mode: heat, burn, explode"}}];
+const PLANS = [
+{"id": "flash", "cat": "dc", "preset": "flash", "desc": {"th": "ถ่าน 9 V สวิตช์ และหลอดไฟ 20 Ω พร้อมแอมมิเตอร์และโวลต์มิเตอร์ วงจรแรกที่ควรรู้จัก", "en": "A 9 V battery, a switch and a 20 Ω bulb, with an ammeter and a voltmeter. The first circuit to know."}, "idea": {"th": "กระแสออกจากขั้วบวก ผ่านสวิตช์ แอมมิเตอร์ และหลอดไฟ แล้วกลับเข้าขั้วลบ มีทางเดียว กระแสจึงเท่ากันทุกจุด I = V/R = 9/20 = 0.45 A", "en": "Current leaves the + terminal, passes the switch, the ammeter and the bulb, and returns to −. There is one path, so the current is the same everywhere: I = V/R = 9/20 = 0.45 A."}, "try": {"th": "แตะสวิตช์บนแผงเล็กให้ตัด ทายก่อนว่าแอมมิเตอร์และโวลต์มิเตอร์จะอ่านเท่าไร (0 A และ 0 V เพราะหลอดไม่มีกระแส)", "en": "Tap the switch on the small board to open it. Guess both meters first (0 A and 0 V, since the bulb has no current)."}, "quiz": {"q": {"th": "แอมมิเตอร์ควรอ่านได้เท่าไร", "en": "What should the ammeter read?"}, "opts": [{"th": "0.45 A", "en": "0.45 A"}, {"th": "9 A", "en": "9 A"}, {"th": "0.2 A", "en": "0.2 A"}, {"th": "180 A", "en": "180 A"}], "hint": {"th": "กระแส = แรงดัน ÷ ความต้านทาน ถ้าได้ 180 A แปลว่าเอา 9 คูณ 20 ลองหารแทน", "en": "Current = voltage ÷ resistance. 180 A would mean 9 times 20: try dividing instead."}, "why": {"th": "I = V/R = 9/20 = 0.45 A", "en": "I = V/R = 9/20 = 0.45 A"}}},
+{"id": "series3", "cat": "dc", "code": "CIRCUIT v1 ideal=1\nDC  2,10 2,8   E=12 name=E\nAM  4,3 6,3    name=I\nB   9,4 9,6    R=8 name=B1\nB   9,8 9,10   R=8 name=B2\nB   9,12 9,14  R=8 name=B3\nVM  12,4 12,6  name=V1\nVM  12,8 12,10 name=V2\nVM  12,12 12,14 name=V3\nW   2,8 2,3 4,3\nW   6,3 9,3 9,4\nW   9,6 9,8\nW   9,10 9,12\nW   9,14 9,15\nW   2,10 2,15 9,15\nW   9,4 12,4\nW   9,6 12,6\nW   9,8 12,8\nW   9,10 12,10\nW   9,12 12,12\nW   9,14 12,14", "title": {"th": "หลอดไฟสามดวงต่ออนุกรม", "en": "Three bulbs in series"}, "desc": {"th": "หลอด 8 Ω สามดวงเรียงอยู่ในทางเดียวกันกับถ่าน 12 V", "en": "Three 8 Ω bulbs in one path with a 12 V battery."}, "idea": {"th": "มีทางเดินทางเดียว กระแสจึงเท่ากันทุกดวง R รวม = 8 + 8 + 8 = 24 Ω ได้ I = 12/24 = 0.5 A แต่ละดวงได้แรงดัน 4 V รวมกันเท่ากับ 12 V ของถ่านพอดี", "en": "There is one path, so every bulb carries the same current. Total R = 8 + 8 + 8 = 24 Ω and I = 12/24 = 0.5 A. Each bulb gets 4 V, and the three add up to the battery's 12 V."}, "try": {"th": "เปลี่ยน B3 เป็น 16 Ω ทายก่อนว่าแรงดันของแต่ละดวงเป็นเท่าไร (3 V, 3 V และ 6 V)", "en": "Change B3 to 16 Ω. Predict each bulb's voltage first (3 V, 3 V and 6 V)."}, "quiz": {"q": {"th": "โวลต์มิเตอร์ V2 อ่านได้เท่าไร", "en": "What does voltmeter V2 read?"}, "opts": [{"th": "4 V", "en": "4 V"}, {"th": "12 V", "en": "12 V"}, {"th": "8 V", "en": "8 V"}, {"th": "0 V", "en": "0 V"}], "hint": {"th": "ถ้าทุกดวงได้ 12 V เต็ม รวมสามดวงจะเป็น 36 V ซึ่งมากกว่าถ่านที่มีแค่ 12 V เป็นไปได้ไหม", "en": "If every bulb got the full 12 V, the three would add up to 36 V, more than the 12 V battery has. Can that be?"}, "why": {"th": "หลอดเหมือนกันสามดวง แรงดัน 12 V แบ่งเท่ากัน ดวงละ 4 V", "en": "Three identical bulbs share the 12 V equally: 4 V each."}}},
+{"id": "divider3", "cat": "dc", "code": "CIRCUIT v1 ideal=1\nDC  2,10 2,8   E=12 name=E\nAM  4,3 6,3    name=I\nR   9,4 9,6    R=100 name=R1\nR   9,8 9,10   R=200 name=R2\nR   9,12 9,14  R=300 name=R3\nVM  12,4 12,6  name=V_R1\nVM  12,8 12,10 name=V_R2\nVM  12,12 12,14 name=V_R3\nGND 4,15 4,17\nW   2,8 2,3 4,3\nW   6,3 9,3 9,4\nW   9,6 9,8\nW   9,10 9,12\nW   9,14 9,15\nW   2,10 2,15 9,15\nW   9,4 12,4\nW   9,6 12,6\nW   9,8 12,8\nW   9,10 12,10\nW   9,12 12,12\nW   9,14 12,14", "title": {"th": "ตัวแบ่งแรงดันสามตัว", "en": "Three-resistor divider"}, "desc": {"th": "ตัวต้านทาน 100, 200 และ 300 Ω ต่ออนุกรมกับถ่าน 12 V มีจุดกราวที่ขั้วลบ", "en": "100, 200 and 300 Ω in series with a 12 V battery, grounded at the − terminal."}, "idea": {"th": "กระแสเท่ากันทุกตัว I = 12/600 = 20 mA แรงดันแบ่งตามสัดส่วนความต้านทาน ตัวที่ R มากได้แรงดันมาก 2 V, 4 V และ 6 V", "en": "The same current flows through all three, I = 12/600 = 20 mA. The voltage is shared in proportion to R, so the larger R gets more: 2 V, 4 V and 6 V."}, "try": {"th": "เปลี่ยน R3 เป็น 900 Ω ทายก่อนว่ามิเตอร์ทั้งสามอ่านเท่าไร (1 V, 2 V และ 9 V)", "en": "Change R3 to 900 Ω. Predict the three meters first (1 V, 2 V and 9 V)."}, "quiz": {"q": {"th": "ตัวต้านทานตัวไหนได้แรงดันมากที่สุด", "en": "Which resistor gets the most voltage?"}, "opts": [{"th": "R3 (300 Ω)", "en": "R3 (300 Ω)"}, {"th": "R1 (100 Ω)", "en": "R1 (100 Ω)"}, {"th": "R2 (200 Ω)", "en": "R2 (200 Ω)"}, {"th": "เท่ากันทุกตัว", "en": "All the same"}], "hint": {"th": "กระแสเท่ากันทุกตัว และ V = IR ถ้า I เท่ากัน ตัวที่ได้แรงดันมากสุดต้องเป็นตัวที่ R เท่าไร", "en": "The current is the same in all three, and V = IR. With the same I, which R gives the largest V?"}, "why": {"th": "V = IR = 0.02 × 300 = 6 V มากที่สุด", "en": "V = IR = 0.02 × 300 = 6 V, the largest."}}},
+{"id": "cells_series", "cat": "dc", "code": "CIRCUIT v1 ideal=1\nDC  2,12 2,10  E=1.5 name=E1\nDC  2,8 2,6    E=1.5 name=E2\nAM  5,3 7,3    name=I\nB   10,8 10,10 R=6 name=B1\nVM  13,8 13,10 name=V\nW   2,10 2,8\nW   2,6 2,3 5,3\nW   7,3 10,3 10,8\nW   10,10 10,15 2,15 2,12\nW   10,8 13,8\nW   10,10 13,10", "title": {"th": "ถ่านสองก้อนต่ออนุกรม", "en": "Two cells in series"}, "desc": {"th": "ถ่าน 1.5 V สองก้อน ขั้วบวกของก้อนล่างต่อกับขั้วลบของก้อนบน จ่ายไฟให้หลอด 6 Ω", "en": "Two 1.5 V cells, the + of the lower one joined to the − of the upper one, feeding a 6 Ω bulb."}, "idea": {"th": "ถ่านที่ต่ออนุกรมหันไปทางเดียวกัน แรงดันบวกกัน 1.5 + 1.5 = 3 V จึงได้กระแส 3/6 = 0.5 A เหมือนถ่านในไฟฉายที่เรียงต่อกัน", "en": "Cells in series facing the same way add up: 1.5 + 1.5 = 3 V, so the current is 3/6 = 0.5 A. That is how cells sit in a flashlight."}, "try": {"th": "กลับหัวถ่าน E2 (หมุนสองครั้ง) ทายก่อนว่าหลอดจะเป็นอย่างไร (ดับ แรงดันหักล้างกันเหลือ 0 V)", "en": "Turn cell E2 around (rotate it twice). Predict the bulb first (it goes out: the voltages cancel to 0 V)."}, "quiz": {"q": {"th": "โวลต์มิเตอร์ V คร่อมหลอดอ่านได้เท่าไร", "en": "What does voltmeter V across the bulb read?"}, "opts": [{"th": "3 V", "en": "3 V"}, {"th": "1.5 V", "en": "1.5 V"}, {"th": "0.75 V", "en": "0.75 V"}, {"th": "6 V", "en": "6 V"}], "hint": {"th": "ถ้าหลอดได้แค่ 1.5 V ถ่านก้อนที่สองที่อยู่ในทางเดียวกันกำลังทำอะไรอยู่", "en": "If the bulb got only 1.5 V, what would the second cell in the same path be doing?"}, "why": {"th": "อนุกรมหันทางเดียวกัน แรงดันบวกกัน 1.5 + 1.5 = 3 V", "en": "In series and facing the same way, the voltages add: 1.5 + 1.5 = 3 V."}}},
+{"id": "cells_parallel", "cat": "dc", "code": "CIRCUIT v1 ideal=1\nDC  2,10 2,8   E=6 name=E1\nDC  6,10 6,8   E=6 name=E2\nAM  2,6 2,4    name=I_1\nAM  6,6 6,4    name=I_2\nB   12,8 12,10 R=12 name=B1\nVM  15,8 15,10 name=V\nW   2,8 2,6\nW   6,8 6,6\nW   2,4 2,3 12,3 12,8\nW   6,4 6,3\nW   12,10 12,15 2,15 2,10\nW   6,10 6,15\nW   12,8 15,8\nW   12,10 15,10", "title": {"th": "ถ่านสองก้อนต่อขนาน", "en": "Two cells in parallel"}, "desc": {"th": "ถ่าน 6 V สองก้อนต่อขนานกัน ช่วยกันจ่ายไฟให้หลอด 12 Ω มีแอมมิเตอร์ที่ถ่านแต่ละก้อน", "en": "Two 6 V cells side by side share the job of feeding a 12 Ω bulb, with an ammeter on each cell."}, "idea": {"th": "ต่อขนานแล้วแรงดันยังเป็น 6 V เท่าเดิม หลอดได้ 6/12 = 0.5 A แต่ถ่านแต่ละก้อนจ่ายแค่ครึ่งเดียว 0.25 A จึงใช้ได้นานขึ้น", "en": "In parallel the voltage stays 6 V and the bulb gets 6/12 = 0.5 A, but each cell supplies only half, 0.25 A, so they last longer."}, "try": {"th": "พักการทำงานถ่าน E2 ทายก่อนว่าหลอดสว่างเท่าเดิมไหม และ I_1 อ่านเท่าไร (เท่าเดิม I_1 = 0.5 A)", "en": "Disable cell E2. Is the bulb as bright as before, and what does I_1 read? (Same brightness, I_1 = 0.5 A.)"}, "quiz": {"q": {"th": "แอมมิเตอร์ I_1 อ่านได้เท่าไร", "en": "What does ammeter I_1 read?"}, "opts": [{"th": "0.25 A", "en": "0.25 A"}, {"th": "0.5 A", "en": "0.5 A"}, {"th": "1 A", "en": "1 A"}, {"th": "0 A", "en": "0 A"}], "hint": {"th": "หลอดใช้ 0.5 A ถ้าถ่านแต่ละก้อนจ่าย 0.5 A รวมกันที่หลอดจะเป็นเท่าไร เกินที่หลอดใช้ไหม", "en": "The bulb takes 0.5 A. If each cell gave 0.5 A, how much would arrive at the bulb? More than it takes?"}, "why": {"th": "ถ่านเหมือนกันสองก้อนแบ่งกันจ่ายคนละครึ่ง 0.5/2 = 0.25 A", "en": "Two identical cells share the load: 0.5/2 = 0.25 A each."}}},
+{"id": "opposing", "cat": "dc", "code": "CIRCUIT v1 ideal=1\nDC  2,10 2,8   E=9 name=E1\nDC  8,3 6,3    E=3 name=E2\nAM  12,4 12,6  name=I\nR   12,8 12,10 R=6 name=R\nVM  15,8 15,10 name=V\nW   2,8 2,3 6,3\nW   8,3 12,3 12,4\nW   12,6 12,8\nW   12,10 12,15 2,15 2,10\nW   12,8 15,8\nW   12,10 15,10", "title": {"th": "ถ่านต่อสวนทางกัน", "en": "Batteries facing each other"}, "desc": {"th": "ถ่าน 9 V กับ 3 V อยู่ในลูปเดียวกันแต่หันขั้วสวนกัน ต่อกับตัวต้านทาน 6 Ω", "en": "A 9 V and a 3 V battery in one loop, facing opposite ways, with a 6 Ω resistor."}, "idea": {"th": "แรงดันที่หันสวนกันหักล้างกัน เหลือ 9 − 3 = 6 V กระแสจึงเป็น 6/6 = 1 A และไหลตามทิศที่ถ่านก้อนที่แรงกว่าดัน", "en": "Opposing voltages subtract: 9 − 3 = 6 V, so the current is 6/6 = 1 A, in the direction the stronger battery pushes."}, "try": {"th": "เปลี่ยน E2 เป็น 9 V ทายก่อนว่ากระแสเป็นเท่าไร (0 A)", "en": "Set E2 to 9 V. Predict the current first (0 A)."}, "quiz": {"q": {"th": "แอมมิเตอร์ I อ่านได้เท่าไร", "en": "What does ammeter I read?"}, "opts": [{"th": "1 A", "en": "1 A"}, {"th": "2 A", "en": "2 A"}, {"th": "1.5 A", "en": "1.5 A"}, {"th": "0 A", "en": "0 A"}], "hint": {"th": "ถ้าแรงดันบวกกันได้ 12 V กระแสจะเป็น 2 A แต่ถ่าน E2 หันขั้วไปทางไหน มันช่วยดันหรือดันสวน", "en": "Adding them gives 12 V and 2 A. But which way does E2 face: does it help or push back?"}, "why": {"th": "(9 − 3)/6 = 1 A", "en": "(9 − 3)/6 = 1 A"}}},
+{"id": "par", "cat": "net", "preset": "par", "desc": {"th": "หลอด 24 Ω สามดวงต่อขนานกับถ่าน 12 V ดวงที่สามมีสวิตช์ของตัวเอง", "en": "Three 24 Ω bulbs in parallel on a 12 V battery; the third has its own switch."}, "idea": {"th": "ทุกสาขาได้แรงดัน 12 V เต็ม แต่ละดวงใช้ 12/24 = 0.5 A กระแสรวมที่ออกจากถ่านคือผลบวก 1.5 A", "en": "Every branch gets the full 12 V. Each bulb takes 12/24 = 0.5 A, and the battery supplies the sum, 1.5 A."}, "try": {"th": "แตะสวิตช์ของดวงที่สามบนแผงเล็ก ทายก่อนว่าแอมมิเตอร์อ่านเท่าไร และอีกสองดวงหรี่ลงไหม (1 A และไม่หรี่)", "en": "Tap the third bulb's switch on the small board. Predict the ammeter (1 A) and whether the other two dim (they do not)."}, "quiz": {"q": {"th": "แอมมิเตอร์อ่านกระแสรวมได้เท่าไร", "en": "What total current does the ammeter read?"}, "opts": [{"th": "1.5 A", "en": "1.5 A"}, {"th": "0.5 A", "en": "0.5 A"}, {"th": "0.17 A", "en": "0.17 A"}, {"th": "4.5 A", "en": "4.5 A"}], "hint": {"th": "ถ้าสามดวงต่ออนุกรมจะได้ 72 Ω และ 0.17 A แต่ที่นี่แต่ละดวงต่อตรงกับถ่าน แต่ละดวงได้กี่แอมป์", "en": "In series the three would make 72 Ω and 0.17 A. Here each bulb sits straight across the battery: how much does each take?"}, "why": {"th": "แต่ละดวง 12/24 = 0.5 A สามดวงรวม 1.5 A", "en": "Each bulb 12/24 = 0.5 A, three of them 1.5 A."}}},
+{"id": "parallel3", "cat": "net", "code": "CIRCUIT v1 ideal=1\nDC  2,10 2,8   E=12 name=E\nAM  4,3 6,3    name=I_total\nAM  9,5 9,7    name=I_1\nAM  12,5 12,7  name=I_2\nAM  15,5 15,7  name=I_3\nR   9,9 9,11   R=12 name=R1\nR   12,9 12,11 R=24 name=R2\nR   15,9 15,11 R=6 name=R3\nW   2,8 2,3 4,3\nW   6,3 15,3\nW   9,3 9,5\nW   12,3 12,5\nW   15,3 15,5\nW   9,7 9,9\nW   12,7 12,9\nW   15,7 15,9\nW   9,11 9,14\nW   12,11 12,14\nW   15,11 15,14 2,14 2,10", "title": {"th": "ตัวต้านทานสามตัวต่อขนาน", "en": "Three resistors in parallel"}, "desc": {"th": "R 12, 24 และ 6 Ω ต่อขนานกับถ่าน 12 V มีแอมมิเตอร์ทุกสาขาและที่ทางรวม", "en": "12, 24 and 6 Ω in parallel on 12 V, with an ammeter in every branch and on the main line."}, "idea": {"th": "แรงดันเท่ากันทุกสาขา กระแสแบ่งตามความต้านทาน R น้อยได้กระแสมาก 1 A, 0.5 A และ 2 A รวมกันได้ 3.5 A ตามกฎกระแสของเคอร์ชอฟฟ์", "en": "Same voltage in every branch; the current splits by resistance, the smaller R taking more: 1 A, 0.5 A and 2 A, adding up to 3.5 A (Kirchhoff's current law)."}, "try": {"th": "เพิ่มตัวต้านทาน 12 Ω อีกหนึ่งสาขา ทายก่อนว่า I_total เป็นเท่าไร (4.5 A)", "en": "Add one more 12 Ω branch. Predict I_total first (4.5 A)."}, "quiz": {"q": {"th": "สาขาไหนมีกระแสมากที่สุด", "en": "Which branch carries the most current?"}, "opts": [{"th": "I_3 (6 Ω)", "en": "I_3 (6 Ω)"}, {"th": "I_2 (24 Ω)", "en": "I_2 (24 Ω)"}, {"th": "I_1 (12 Ω)", "en": "I_1 (12 Ω)"}, {"th": "เท่ากันทุกสาขา", "en": "All the same"}], "hint": {"th": "ทุกสาขาได้ 12 V เท่ากัน และ I = V/R ถ้า V เท่ากัน หารด้วย R ตัวไหนแล้วได้ผลมากที่สุด", "en": "Every branch has the same 12 V, and I = V/R. With the same V, which R gives the biggest result?"}, "why": {"th": "12/6 = 2 A มากที่สุด", "en": "12/6 = 2 A, the largest."}}},
+{"id": "bulbs_abc", "cat": "net", "code": "CIRCUIT v1 ideal=1\nDC  2,10 2,8   E=12 name=E\nB   5,3 7,3    R=6 name=A\nB   10,7 10,9  R=6 name=B\nB   14,7 14,9  R=6 name=C\nW   2,8 2,3 5,3\nW   7,3 14,3 14,7\nW   10,3 10,7\nW   10,9 10,13\nW   14,9 14,13 2,13 2,10", "title": {"th": "หลอด A อนุกรมกับ B ขนาน C", "en": "Bulb A in series with B ∥ C"}, "desc": {"th": "หลอดเหมือนกันสามดวง ดวงละ 6 Ω หลอด A อยู่ทางหลัก ส่วน B กับ C แยกเป็นสองสาขา", "en": "Three identical 6 Ω bulbs: A on the main line, B and C on two branches."}, "idea": {"th": "กระแสทั้งหมดผ่าน A ก่อน แล้วแบ่งครึ่งให้ B กับ C ความต้านทานรวม 6 + 3 = 9 Ω ได้ I_A = 12/9 ≈ 1.33 A ส่วน B และ C ได้คนละ 0.67 A A จึงสว่างที่สุด", "en": "All the current goes through A first, then splits in half for B and C. Total R = 6 + 3 = 9 Ω, so I_A = 12/9 ≈ 1.33 A and B and C get 0.67 A each. A is the brightest."}, "try": {"th": "พักการทำงานหลอด C ทายก่อนว่า A หรี่ลงหรือสว่างขึ้น และ B เป็นอย่างไร (A หรี่ลง B สว่างขึ้น ทั้งคู่ได้ 1 A)", "en": "Disable bulb C. Does A dim or brighten, and what does B do? (A dims, B brightens: both carry 1 A.)"}, "quiz": {"q": {"th": "หลอดไหนสว่างที่สุด", "en": "Which bulb is the brightest?"}, "opts": [{"th": "A", "en": "A"}, {"th": "B", "en": "B"}, {"th": "C", "en": "C"}, {"th": "เท่ากันทั้งสามดวง", "en": "All three the same"}], "hint": {"th": "กระแสที่ไหลใน B กับ C มาจากไหน ก่อนจะแยกสาขา มันผ่านหลอดไหนมาแล้ว", "en": "Where does the current in B and C come from? Before it splits, which bulb has it already passed?"}, "why": {"th": "A ได้กระแสทั้งหมด 1.33 A ส่วน B กับ C แบ่งกันคนละครึ่ง กำลัง P = I²R ของ A จึงมากที่สุด", "en": "A carries the whole 1.33 A while B and C share it, so A has the largest power P = I²R."}}},
+{"id": "wheatstone", "cat": "net", "code": "CIRCUIT v1 ideal=1\nDC  2,10 2,8   E=9 name=E\nR   6,5 6,7    R=100 name=R1\nR   6,9 6,11   R=200 name=R2\nR   13,5 13,7  R=150 name=R3\nR   13,9 13,11 R=300 name=R4\nAM  9,8 11,8   name=I_G\nW   2,8 2,3 13,3 13,5\nW   6,3 6,5\nW   6,7 6,9\nW   13,7 13,9\nW   6,8 9,8\nW   11,8 13,8\nW   6,11 6,13\nW   13,11 13,13 2,13 2,10", "title": {"th": "สะพานวีตสโตน", "en": "Wheatstone bridge"}, "desc": {"th": "ตัวต้านทานสองคู่ 100/200 Ω และ 150/300 Ω มีแอมมิเตอร์ I_G เชื่อมจุดกลางของสองฝั่ง", "en": "Two resistor pairs, 100/200 Ω and 150/300 Ω, with ammeter I_G joining their middle points."}, "idea": {"th": "ฝั่งซ้ายแบ่ง 9 V ในสัดส่วน 1 : 2 ฝั่งขวาก็ 1 : 2 จุดกลางทั้งสองจึงมีศักย์ 6 V เท่ากัน ไม่มีแรงดันดันกระแสผ่าน I_G สะพานจึงสมดุล (R1/R2 = R3/R4)", "en": "Each side splits the 9 V in the same 1 : 2 ratio, so both middle points sit at 6 V. Nothing pushes current through I_G: the bridge is balanced (R1/R2 = R3/R4)."}, "try": {"th": "เปลี่ยน R4 เป็น 600 Ω ทายก่อนว่า I_G เป็นบวกหรือลบ (ลบ กระแสไหลจากขวาไปซ้าย)", "en": "Change R4 to 600 Ω. Will I_G read positive or negative? (Negative: the current flows right to left.)"}, "quiz": {"q": {"th": "แอมมิเตอร์ I_G อ่านได้เท่าไร", "en": "What does ammeter I_G read?"}, "opts": [{"th": "0 A", "en": "0 A"}, {"th": "30 mA", "en": "30 mA"}, {"th": "20 mA", "en": "20 mA"}, {"th": "50 mA", "en": "50 mA"}], "hint": {"th": "ลองหาศักย์ของจุดกลางทั้งสองฝั่ง ถ้าเท่ากัน อะไรจะดันกระแสให้ไหลข้ามจากฝั่งหนึ่งไปอีกฝั่ง", "en": "Work out the potential of both middle points. If they are equal, what would push current across?"}, "why": {"th": "จุดกลางทั้งสองมีศักย์ 6 V เท่ากัน สะพานสมดุล I_G = 0", "en": "Both middle points are at 6 V, the bridge is balanced and I_G = 0."}}},
+{"id": "two_source", "cat": "net", "code": "CIRCUIT v1 ideal=1\nDC  2,10 2,8   E=12 name=E1\nR   3,3 5,3    R=4 name=R1\nAM  5,3 7,3    name=I_1\nAM  13,3 11,3  name=I_2\nR   13,3 15,3  R=2 name=R2\nDC  16,10 16,8 E=9 name=E2\nAM  9,5 9,7    name=I_3\nR   9,9 9,11   R=4 name=R3\nW   2,8 2,3 3,3\nW   7,3 11,3\nW   9,3 9,5\nW   9,7 9,9\nW   15,3 16,3 16,8\nW   9,11 9,13\nW   2,10 2,13 16,13 16,10", "title": {"th": "แหล่งจ่ายสองตัว (กฎของเคอร์ชอฟฟ์)", "en": "Two sources (Kirchhoff)"}, "desc": {"th": "ถ่าน 12 V และ 9 V จ่ายไฟเข้าตัวต้านทาน R3 ร่วมกัน ผ่าน R1 และ R2", "en": "A 12 V and a 9 V battery both feed R3, through R1 and R2."}, "idea": {"th": "ใช้กฎของเคอร์ชอฟฟ์ ให้จุดบนของ R3 มีศักย์ V จะได้ (12 − V)/4 + (9 − V)/2 = V/4 แก้ได้ V = 7.5 V ดังนั้น I_1 = 1.125 A, I_2 = 0.75 A และ I_3 = 1.875 A = I_1 + I_2", "en": "Use Kirchhoff's laws. Call the potential at the top of R3 V. Then (12 − V)/4 + (9 − V)/2 = V/4, so V = 7.5 V, I_1 = 1.125 A, I_2 = 0.75 A and I_3 = 1.875 A = I_1 + I_2."}, "try": {"th": "เปลี่ยน E2 เป็น 6 V ทายก่อนว่า I_2 อ่านเท่าไร (0 A พอดี เพราะจุดบนของ R3 มีศักย์ 6 V เท่ากับ E2)", "en": "Set E2 to 6 V. Predict I_2 first (exactly 0 A: the top of R3 sits at 6 V, the same as E2)."}, "quiz": {"q": {"th": "แอมมิเตอร์ I_3 อ่านได้เท่าไร", "en": "What does ammeter I_3 read?"}, "opts": [{"th": "1.875 A", "en": "1.875 A"}, {"th": "0.375 A", "en": "0.375 A"}, {"th": "3 A", "en": "3 A"}, {"th": "1.125 A", "en": "1.125 A"}], "hint": {"th": "กระแส I_1 และ I_2 ไหลมารวมกันที่จุดเดียวก่อนลง R3 ที่จุดรวมนั้น กระแสเข้าต้องเท่ากับกระแสออก", "en": "I_1 and I_2 meet at one point before R3. At that point, the current in must equal the current out."}, "why": {"th": "I_3 = I_1 + I_2 = 1.125 + 0.75 = 1.875 A", "en": "I_3 = I_1 + I_2 = 1.125 + 0.75 = 1.875 A"}}},
+{"id": "vm_series", "cat": "meter", "code": "CIRCUIT v1 ideal=1\nDC  2,10 2,8   E=9 name=E\nVM  6,3 8,3    name=V\nB   12,8 12,10 R=20 name=B1\nAM  12,11 12,13 name=I\nW   2,8 2,3 6,3\nW   8,3 12,3 12,8\nW   12,10 12,11\nW   12,13 12,15 2,15 2,10", "title": {"th": "ต่อโวลต์มิเตอร์อนุกรม (ต่อผิด)", "en": "Voltmeter in series (wrong)"}, "desc": {"th": "โวลต์มิเตอร์ถูกวางไว้ในทางเดินของกระแส แทนที่จะต่อคร่อมอุปกรณ์", "en": "A voltmeter placed in the current's path instead of across a part."}, "idea": {"th": "โวลต์มิเตอร์มีความต้านทานสูงมาก (ในอุดมคติไม่ให้กระแสผ่านเลย) วงจรจึงเหมือนขาด หลอดดับ I = 0 และโวลต์มิเตอร์อ่าน 9 V เต็ม เพราะคร่อมช่องที่ขาดอยู่", "en": "A voltmeter has a huge resistance (ideally no current passes at all), so the circuit acts as if broken: the bulb is off, I = 0, and the voltmeter reads the full 9 V across the gap."}, "try": {"th": "ย้ายโวลต์มิเตอร์ไปคร่อมหลอด แล้วต่อสายตรงที่เดิม ทายก่อนว่าอ่านเท่าไร (9 V และหลอดติด)", "en": "Move the voltmeter across the bulb and put a wire where it was. Predict its reading (9 V, and the bulb lights)."}, "quiz": {"q": {"th": "หลอดไฟจะเป็นอย่างไร", "en": "What does the bulb do?"}, "opts": [{"th": "ดับ", "en": "Stays off"}, {"th": "สว่างปกติ", "en": "Lights normally"}, {"th": "สว่างครึ่งเดียว", "en": "Half bright"}, {"th": "ระเบิด", "en": "Explodes"}], "hint": {"th": "โวลต์มิเตอร์ในอุดมคติไม่ยอมให้กระแสผ่าน ถ้ามันขวางทางเดียวของกระแส กระแสจะไปทางไหนได้", "en": "An ideal voltmeter lets no current through. If it blocks the only path, where can the current go?"}, "why": {"th": "ไม่มีกระแส หลอดจึงดับ และแรงดันทั้งหมดไปอยู่คร่อมโวลต์มิเตอร์", "en": "No current flows, so the bulb is off and the whole voltage sits across the voltmeter."}}},
+{"id": "am_parallel", "cat": "meter", "code": "CIRCUIT v1 ideal=1\nDC  2,10 2,8   E=9 name=E\nR   5,3 7,3    R=30 name=R\nB   11,8 11,10 R=20 name=B1\nAM  15,8 15,10 name=I\nW   2,8 2,3 5,3\nW   7,3 11,3 11,8\nW   11,8 15,8\nW   11,10 15,10\nW   11,10 11,14 2,14 2,10", "title": {"th": "ต่อแอมมิเตอร์คร่อมหลอด (ต่อผิด)", "en": "Ammeter across a bulb (wrong)"}, "desc": {"th": "แอมมิเตอร์ถูกต่อคร่อมหลอดไฟ แทนที่จะต่ออนุกรม", "en": "An ammeter connected across the bulb instead of in series."}, "idea": {"th": "แอมมิเตอร์แทบไม่มีความต้านทาน จึงกลายเป็นทางลัดให้กระแสทั้งหมดอ้อมหลอด หลอดดับ และแอมมิเตอร์อ่าน 9/30 = 0.3 A ถ้าไม่มี R 30 Ω คั่นไว้ จะเท่ากับลัดวงจรถ่าน", "en": "An ammeter has almost no resistance, so it becomes a shortcut: all the current bypasses the bulb, the bulb is off, and the ammeter reads 9/30 = 0.3 A. Without the 30 Ω resistor this would short the battery."}, "try": {"th": "ย้ายแอมมิเตอร์ไปต่ออนุกรมกับหลอด ทายก่อนว่าอ่านได้เท่าไร (9/50 = 0.18 A)", "en": "Move the ammeter into series with the bulb. Predict its reading first (9/50 = 0.18 A)."}, "quiz": {"q": {"th": "หลอดไฟได้กระแสเท่าไร", "en": "How much current goes through the bulb?"}, "opts": [{"th": "0 A", "en": "0 A"}, {"th": "0.18 A", "en": "0.18 A"}, {"th": "0.3 A", "en": "0.3 A"}, {"th": "0.45 A", "en": "0.45 A"}], "hint": {"th": "กระแสชอบทางที่ต้านน้อย ระหว่างหลอด 20 Ω กับแอมมิเตอร์ที่แทบเป็นสายไฟ มันจะเลือกทางไหน", "en": "Current prefers the easy path. Between a 20 Ω bulb and an ammeter that is almost a wire, which one wins?"}, "why": {"th": "แอมมิเตอร์ลัดหลอดไว้ กระแสทั้ง 0.3 A อ้อมไปทางแอมมิเตอร์ หลอดได้ 0 A", "en": "The ammeter shorts the bulb: all 0.3 A goes around through it, and the bulb gets 0 A."}}},
+{"id": "switch_and", "cat": "switch", "code": "CIRCUIT v1 ideal=1\nDC  2,10 2,8   E=9 name=E\nS   4,3 6,3    name=S1\nS   8,3 10,3   on=0 name=S2\nB   13,8 13,10 R=20 name=B1\nAM  13,11 13,13 name=I\nW   2,8 2,3 4,3\nW   6,3 8,3\nW   10,3 13,3 13,8\nW   13,10 13,11\nW   13,13 13,15 2,15 2,10", "title": {"th": "สวิตช์สองตัวต่ออนุกรม (และ)", "en": "Two switches in series (AND)"}, "desc": {"th": "สวิตช์ S1 กับ S2 อยู่ในทางเดียวกัน ตอนนี้ S2 ตัดอยู่", "en": "S1 and S2 sit on the same path; S2 is open."}, "idea": {"th": "หลอดติดเมื่อ S1 และ S2 ต่อทั้งคู่ ตัวใดตัวหนึ่งตัด ทางเดินเดียวของกระแสก็ขาด เหมือนประตูสองบานที่ต้องเปิดทั้งสองบานจึงเดินผ่านได้", "en": "The bulb lights only when S1 and S2 are both closed. Either one open breaks the only path, like two doors that both have to be open to walk through."}, "try": {"th": "แตะ S2 บนแผงเล็ก ทายก่อนว่าแอมมิเตอร์จะอ่านเท่าไร (0.45 A)", "en": "Tap S2 on the small board. Predict the ammeter first (0.45 A)."}, "quiz": {"q": {"th": "ตอนนี้ (S1 ต่อ S2 ตัด) หลอดติดไหม", "en": "Right now (S1 closed, S2 open), is the bulb on?"}, "opts": [{"th": "ดับ", "en": "Off"}, {"th": "ติด", "en": "On"}, {"th": "ติดครึ่งเดียว", "en": "Half bright"}, {"th": "กะพริบ", "en": "Blinking"}], "hint": {"th": "ลองไล่ทางเดินจากขั้วบวก ผ่าน S1 แล้วไปถึง S2 กระแสข้าม S2 ที่ตัดอยู่ได้ไหม มีทางอ้อมไหม", "en": "Trace from + through S1 to S2. Can the current cross an open S2? Is there a way around it?"}, "why": {"th": "อนุกรม: ตัดตัวเดียวก็ขาดทั้งวง กระแส 0 A", "en": "In series, one open switch breaks the whole loop: 0 A."}}},
+{"id": "switch_or", "cat": "switch", "code": "CIRCUIT v1 ideal=1\nDC  2,10 2,8   E=9 name=E\nS   6,3 8,3    on=0 name=S1\nS   6,5 8,5    name=S2\nB   13,8 13,10 R=20 name=B1\nAM  13,11 13,13 name=I\nW   2,8 2,3 6,3\nW   4,3 4,5 6,5\nW   8,3 13,3 13,8\nW   8,5 10,5 10,3\nW   13,10 13,11\nW   13,13 13,15 2,15 2,10", "title": {"th": "สวิตช์สองตัวต่อขนาน (หรือ)", "en": "Two switches in parallel (OR)"}, "desc": {"th": "สวิตช์ S1 กับ S2 วางคู่กันเป็นสองทาง ตอนนี้ S1 ตัด S2 ต่อ", "en": "S1 and S2 side by side as two routes; S1 is open, S2 is closed."}, "idea": {"th": "หลอดติดเมื่อ S1 หรือ S2 ต่ออย่างน้อยหนึ่งตัว เพราะกระแสอ้อมไปทางที่ต่ออยู่ได้ เหมือนถนนสองเส้นที่ไปที่เดียวกัน ปิดเส้นหนึ่งรถก็ยังไปอีกเส้นได้", "en": "The bulb lights when S1 or S2 (or both) is closed, because the current can go around through whichever is closed, like two roads to the same place: close one and the traffic takes the other."}, "try": {"th": "แตะ S2 ให้ตัด ทายก่อนว่าหลอดเป็นอย่างไร แล้วแตะ S1 ให้ต่อ (ดับ แล้วติดอีกครั้ง)", "en": "Tap S2 open and predict the bulb, then tap S1 closed (off, then on again)."}, "quiz": {"q": {"th": "แอมมิเตอร์ I อ่านได้เท่าไร", "en": "What does ammeter I read?"}, "opts": [{"th": "0.45 A", "en": "0.45 A"}, {"th": "0 A", "en": "0 A"}, {"th": "0.225 A", "en": "0.225 A"}, {"th": "0.9 A", "en": "0.9 A"}], "hint": {"th": "S1 ตัดอยู่ก็จริง แต่ยังมีอีกทางผ่าน S2 ไหม ถ้ามี หลอดได้แรงดันเท่าไร", "en": "S1 is open, but is there still a route through S2? If so, what voltage does the bulb get?"}, "why": {"th": "กระแสไหลผ่าน S2 หลอดได้ 9 V เต็ม I = 9/20 = 0.45 A", "en": "The current goes through S2, the bulb gets the full 9 V: I = 9/20 = 0.45 A."}}},
+{"id": "rc", "cat": "store", "preset": "rc", "desc": {"th": "ถ่าน 9 V ชาร์จตัวเก็บประจุ 4,700 µF ผ่านตัวต้านทาน 220 Ω สวิตช์เริ่มต้นที่ตัด", "en": "A 9 V battery charges a 4,700 µF capacitor through 220 Ω. The switch starts open."}, "idea": {"th": "แตะสวิตช์ให้ต่อ กระแสเริ่มต้นมาก (9/220 ≈ 41 mA) แล้วลดลงเรื่อยๆ เพราะประจุที่สะสมดันกลับ แรงดันของตัวเก็บประจุไต่ขึ้นหา 9 V ค่าคงที่เวลา τ = RC ≈ 1 s", "en": "Tap the switch closed. The current starts large (9/220 ≈ 41 mA) and keeps falling as the stored charge pushes back, while the capacitor voltage climbs toward 9 V. Time constant τ = RC ≈ 1 s."}, "try": {"th": "เปลี่ยน R เป็น 440 Ω ทายก่อนว่าต้องใช้เวลานานขึ้นกี่เท่าจึงชาร์จได้ 63% (2 เท่า)", "en": "Change R to 440 Ω. How many times longer does it take to reach 63%? (Twice as long.)"}, "quiz": {"q": {"th": "ถ้าต่อสวิตช์ทิ้งไว้นานๆ โวลต์มิเตอร์จะอ่านได้ประมาณเท่าไร", "en": "Leave the switch closed for a long time. About what does the voltmeter end up reading?"}, "opts": [{"th": "9 V", "en": "9 V"}, {"th": "0 V", "en": "0 V"}, {"th": "4.5 V", "en": "4.5 V"}, {"th": "18 V", "en": "18 V"}], "hint": {"th": "เมื่อกระแสหยุดไหล ตัวต้านทานไม่มีแรงดันคร่อม (V = IR = 0) แรงดัน 9 V ของถ่านจะไปอยู่ที่ไหน", "en": "Once the current stops, the resistor has no voltage across it (V = IR = 0). Where does the battery's 9 V go?"}, "why": {"th": "ชาร์จเต็มแล้วกระแสหยุด แรงดันของตัวเก็บประจุเท่ากับถ่าน 9 V", "en": "Fully charged, the current stops and the capacitor sits at the battery's 9 V."}}},
+{"id": "cap_hold", "cat": "store", "code": "CIRCUIT v1 ideal=1\nDC  2,10 2,8   E=9 name=E\nS   4,3 6,3    name=S1\nB   10,8 10,10 R=20 name=B1\nC   14,8 14,10 C=20000 name=C1\nVM  17,8 17,10 name=V_C\nW   2,8 2,3 4,3\nW   6,3 14,3 14,8\nW   10,3 10,8\nW   14,8 17,8\nW   10,10 10,14\nW   14,10 14,14\nW   17,10 17,14 2,14 2,10", "title": {"th": "ตัวเก็บประจุเลี้ยงหลอดหลังตัดไฟ", "en": "A capacitor keeps the bulb lit"}, "desc": {"th": "ตัวเก็บประจุ 20,000 µF ต่อคร่อมหลอด 20 Ω มีสวิตช์ตัดไฟจากถ่าน", "en": "A 20,000 µF capacitor across a 20 Ω bulb, with a switch to cut off the battery."}, "idea": {"th": "ตอนสวิตช์ต่อ ตัวเก็บประจุชาร์จเต็ม 9 V พอแตะสวิตช์ให้ตัด ประจุที่เก็บไว้ไหลออกผ่านหลอด หลอดจึงค่อยๆ หรี่ลง ไม่ดับทันที τ = RC = 20 × 0.02 = 0.4 s", "en": "With the switch closed the capacitor charges to 9 V. Tap the switch open: the stored charge flows out through the bulb, which fades instead of going dark at once. τ = RC = 20 × 0.02 = 0.4 s."}, "try": {"th": "แตะ S1 บนแผงเล็กแล้วดูหลอด ทายก่อนว่ากระแสในหลอดกลับทิศไหม (ไม่กลับ ไหลทางเดิม)", "en": "Tap S1 on the small board and watch the bulb. Does its current reverse? (No, it keeps the same direction.)"}, "quiz": {"q": {"th": "ทันทีหลังตัดสวิตช์ โวลต์มิเตอร์ V_C อ่านได้ประมาณเท่าไร", "en": "Right after the switch opens, about what does V_C read?"}, "opts": [{"th": "9 V", "en": "9 V"}, {"th": "0 V", "en": "0 V"}, {"th": "4.5 V", "en": "4.5 V"}, {"th": "18 V", "en": "18 V"}], "hint": {"th": "แรงดันของตัวเก็บประจุกระโดดทันทีไม่ได้ ต้องมีประจุไหลออกก่อน ก่อนตัดสวิตช์มันมีแรงดันเท่าไร", "en": "A capacitor's voltage cannot jump: charge has to flow out first. What was it just before the switch opened?"}, "why": {"th": "เริ่มที่ 9 V แล้วค่อยๆ ลดลงตาม τ = 0.4 s", "en": "It starts at 9 V and falls with τ = 0.4 s."}}},
+{"id": "caps_series", "cat": "store", "code": "CIRCUIT v1 ideal=1\nDC  2,10 2,8   E=12 name=E\nR   4,3 6,3    R=100 name=R\nC   9,5 9,7    C=100 name=C1\nC   9,10 9,12  C=300 name=C2\nVM  12,5 12,7  name=V_C1\nVM  12,10 12,12 name=V_C2\nW   2,8 2,3 4,3\nW   6,3 9,3 9,5\nW   9,7 9,10\nW   9,12 9,14 2,14 2,10\nW   9,5 12,5\nW   9,7 12,7\nW   9,10 12,10\nW   9,12 12,12", "title": {"th": "ตัวเก็บประจุต่ออนุกรม", "en": "Capacitors in series"}, "desc": {"th": "ตัวเก็บประจุ 100 µF และ 300 µF ต่ออนุกรม ชาร์จจากถ่าน 12 V ผ่าน R 100 Ω", "en": "100 µF and 300 µF in series, charged from 12 V through 100 Ω."}, "idea": {"th": "ตัวเก็บประจุอนุกรมได้ประจุ Q เท่ากัน และ V = Q/C จึงแบ่งแรงดันกลับกับค่าความจุ ตัวที่ C น้อยได้แรงดันมาก V_C1 = 9 V, V_C2 = 3 V", "en": "Capacitors in series take the same charge Q, and V = Q/C, so they share the voltage inversely to C: the smaller one gets more, V_C1 = 9 V and V_C2 = 3 V."}, "try": {"th": "เปลี่ยน C2 เป็น 100 µF ทายก่อนว่าแต่ละตัวได้แรงดันเท่าไร (6 V เท่ากัน)", "en": "Set C2 to 100 µF. Predict both voltages first (6 V each)."}, "quiz": {"q": {"th": "ตัวไหนได้แรงดันมากกว่า", "en": "Which capacitor ends up with more voltage?"}, "opts": [{"th": "C1 (100 µF)", "en": "C1 (100 µF)"}, {"th": "C2 (300 µF)", "en": "C2 (300 µF)"}, {"th": "เท่ากัน", "en": "Equal"}, {"th": "ไม่มีตัวไหนได้เลย", "en": "Neither gets any"}], "hint": {"th": "ประจุ Q ที่ไหลเข้า C1 ต้องเท่ากับที่ไหลเข้า C2 เพราะอยู่ทางเดียวกัน ถ้า Q เท่ากัน V = Q/C ตัวที่ C เล็กได้ V มากหรือน้อย", "en": "The same charge Q flows into both, since they share one path. With equal Q and V = Q/C, does the smaller C get more or less?"}, "why": {"th": "C1 เล็กกว่า 3 เท่า จึงได้แรงดันมากกว่า 3 เท่า 9 V กับ 3 V", "en": "C1 is three times smaller, so it gets three times the voltage: 9 V and 3 V."}}},
+{"id": "rl_bulb", "cat": "store", "code": "CIRCUIT v1 ideal=1\nDC  2,10 2,8   E=9 name=E\nL   5,3 7,3    L=2 name=L\nAM  10,5 10,7  name=I\nB   10,9 10,11 R=10 name=B1\nW   2,8 2,3 5,3\nW   7,3 10,3 10,5\nW   10,7 10,9\nW   10,11 10,14 2,14 2,10", "title": {"th": "หลอดไฟค่อยๆ สว่าง (RL)", "en": "A bulb that brightens slowly (RL)"}, "desc": {"th": "ตัวเหนี่ยวนำ 2 H อนุกรมกับหลอด 10 Ω ต่อกับถ่าน 9 V", "en": "A 2 H inductor in series with a 10 Ω bulb on 9 V."}, "idea": {"th": "ตัวเหนี่ยวนำต้านการเปลี่ยนแปลงของกระแส กระแสจึงไต่ขึ้นช้าๆ จาก 0 ไปหา 9/10 = 0.9 A หลอดค่อยๆ สว่างขึ้น τ = L/R = 0.2 s", "en": "The inductor resists changes in current, so the current climbs slowly from 0 toward 9/10 = 0.9 A and the bulb brightens gradually. τ = L/R = 0.2 s."}, "try": {"th": "กด ↻ เริ่มใหม่ พร้อมเปิดภาพช้า แล้วดูแอมมิเตอร์ ทายก่อนว่าตอน t = 0.2 s อ่านได้ประมาณเท่าไร (0.57 A คือ 63% ของ 0.9 A)", "en": "Press ↻ Restart with slow motion on and watch the ammeter. Guess its reading at t = 0.2 s (0.57 A, 63% of 0.9 A)."}, "quiz": {"q": {"th": "นานพอแล้ว แอมมิเตอร์ I อ่านได้เท่าไร", "en": "After a long time, what does ammeter I read?"}, "opts": [{"th": "0.9 A", "en": "0.9 A"}, {"th": "0 A", "en": "0 A"}, {"th": "4.5 A", "en": "4.5 A"}, {"th": "0.45 A", "en": "0.45 A"}], "hint": {"th": "เมื่อกระแสคงที่แล้ว ไม่มีการเปลี่ยนแปลงให้ตัวเหนี่ยวนำต้าน มันจึงเหมือนสายไฟ เหลือแค่หลอด 10 Ω", "en": "Once the current is steady there is no change left to resist, so the inductor acts like a wire and only the 10 Ω bulb remains."}, "why": {"th": "I = 9/10 = 0.9 A", "en": "I = 9/10 = 0.9 A"}}},
+{"id": "ac_rc", "cat": "ac", "code": "CIRCUIT v1 ideal=1\nAC  2,10 2,8   E=10 f=5 name=E\nR   5,3 7,3    R=30 name=R\nAM  10,4 10,6  name=I\nC   10,8 10,10 C=1000 name=C1\nVM  13,8 13,10 name=V_C\nW   2,8 2,3 5,3\nW   7,3 10,3 10,4\nW   10,6 10,8\nW   10,8 13,8\nW   10,10 13,10\nW   10,10 10,13 2,13 2,10", "title": {"th": "ตัวเก็บประจุกับไฟสลับ", "en": "A capacitor with AC"}, "desc": {"th": "ไฟสลับ 10 V 5 Hz ผ่านตัวต้านทาน 30 Ω ไปยังตัวเก็บประจุ 1,000 µF", "en": "10 V peak, 5 Hz AC through 30 Ω into a 1,000 µF capacitor."}, "idea": {"th": "ไฟสลับทำให้ตัวเก็บประจุชาร์จและคายประจุสลับไปมา กระแสจึงไหลได้ตลอด ตัวเก็บประจุต้านด้วยรีแอกแตนซ์ X_C = 1/(2πfC) ≈ 32 Ω ยิ่งความถี่สูง ยิ่งต้านน้อย", "en": "AC charges and discharges the capacitor back and forth, so current keeps flowing. The capacitor resists with its reactance X_C = 1/(2πfC) ≈ 32 Ω; the higher the frequency, the less it resists."}, "try": {"th": "เปลี่ยน f ของแหล่งจ่ายเป็น 50 Hz ทายก่อนว่าค่าสูงสุดของ V_C เพิ่มขึ้นหรือลดลง (ลดลง เหลือราว 1 V)", "en": "Set the source to 50 Hz. Does the peak of V_C rise or fall? (It falls, to about 1 V.)"}, "quiz": {"q": {"th": "ถ้าเพิ่มความถี่ แรงดันคร่อมตัวเก็บประจุจะเป็นอย่างไร", "en": "If the frequency goes up, what happens to the voltage across the capacitor?"}, "opts": [{"th": "ลดลง", "en": "It falls"}, {"th": "เพิ่มขึ้น", "en": "It rises"}, {"th": "เท่าเดิม", "en": "No change"}, {"th": "เป็นศูนย์ทันที", "en": "It drops to zero at once"}], "hint": {"th": "ความถี่สูงแปลว่ากระแสต้องกลับทิศเร็วขึ้น ประจุมีเวลาสะสมบนแผ่นมากขึ้นหรือน้อยลง", "en": "A higher frequency means the current reverses sooner. Does charge get more or less time to pile up on the plates?"}, "why": {"th": "X_C = 1/(2πfC) ลดลงเมื่อ f เพิ่ม ตัวเก็บประจุจึงได้แรงดันน้อยลง", "en": "X_C = 1/(2πfC) falls as f rises, so the capacitor gets less of the voltage."}}},
+{"id": "rlc", "cat": "ac", "code": "CIRCUIT v1 ideal=1\nAC  2,10 2,8   E=10 f=5 name=E\nR   4,3 6,3    R=10 name=R\nVM  4,5 6,5    name=V_R\nL   8,3 10,3   L=1 name=L\nC   13,6 13,8  C=1000 name=C1\nAM  13,10 13,12 name=I\nW   2,8 2,3 4,3\nW   4,3 4,5\nW   6,3 6,5\nW   6,3 8,3\nW   10,3 13,3 13,6\nW   13,8 13,10\nW   13,12 13,14 2,14 2,10", "title": {"th": "วงจร RLC เรโซแนนซ์", "en": "RLC resonance"}, "desc": {"th": "R 10 Ω, L 1 H และ C 1,000 µF ต่ออนุกรมกับไฟสลับ 10 V 5 Hz", "en": "R 10 Ω, L 1 H and C 1,000 µF in series with 10 V peak, 5 Hz AC."}, "idea": {"th": "ที่ 5 Hz ค่า X_L = 2πfL ≈ 31.4 Ω เกือบเท่ากับ X_C = 1/(2πfC) ≈ 31.8 Ω ผลของ L กับ C หักล้างกัน เหลือแค่ R กระแสจึงสูงสุดราว 10/10 = 1 A เรียกว่าเรโซแนนซ์ ที่ f₀ = 1/(2π√(LC)) ≈ 5 Hz", "en": "At 5 Hz, X_L = 2πfL ≈ 31.4 Ω almost equals X_C = 1/(2πfC) ≈ 31.8 Ω. L and C cancel, only R is left, and the current peaks near 10/10 = 1 A. This is resonance, at f₀ = 1/(2π√(LC)) ≈ 5 Hz."}, "try": {"th": "เปลี่ยน f เป็น 2 Hz ทายก่อนว่ากระแสสูงสุดมากขึ้นหรือน้อยลง (น้อยลง เหลือราว 0.15 A)", "en": "Set f to 2 Hz. Does the current peak go up or down? (Down, to about 0.15 A.)"}, "quiz": {"q": {"th": "ค่าสูงสุดของกระแส I ประมาณเท่าไร", "en": "About how high does the current I peak?"}, "opts": [{"th": "1 A", "en": "1 A"}, {"th": "0.14 A", "en": "0.14 A"}, {"th": "0.31 A", "en": "0.31 A"}, {"th": "0 A", "en": "0 A"}], "hint": {"th": "ถ้า X_L กับ X_C เท่ากันและหักล้างกันพอดี ความต้านรวมของวงจรเหลือเท่าไร", "en": "If X_L and X_C are equal and cancel out, what is left of the circuit's total opposition?"}, "why": {"th": "เรโซแนนซ์: ความต้านรวมเหลือแค่ R = 10 Ω กระแสสูงสุด ≈ 10/10 = 1 A", "en": "Resonance: only R = 10 Ω is left, so the current peaks at about 10/10 = 1 A."}}},
+{"id": "ac_cap", "cat": "ac", "code": "CIRCUIT v1 ideal=1\nAC  2,10 2,8   E=10 f=5 name=E\nC   5,3 7,3    C=2000 name=C1\nB   11,8 11,10 R=10 name=B1\nAM  11,11 11,13 name=I\nW   2,8 2,3 5,3\nW   7,3 11,3 11,8\nW   11,10 11,11\nW   11,13 11,15 2,15 2,10", "title": {"th": "ไฟสลับผ่านตัวเก็บประจุ", "en": "AC passes a capacitor"}, "desc": {"th": "ตัวเก็บประจุ 2,000 µF อนุกรมกับหลอด 10 Ω ต่อกับไฟสลับ 10 V 5 Hz", "en": "A 2,000 µF capacitor in series with a 10 Ω bulb on 10 V peak, 5 Hz AC."}, "idea": {"th": "ไฟตรงผ่านตัวเก็บประจุไม่ได้ (ชาร์จเต็มแล้วกระแสหยุด) แต่ไฟสลับทำให้มันชาร์จกลับไปกลับมา กระแสจึงไหลผ่านหลอดได้ตลอด แม้ไม่มีประจุข้ามฉนวนเลย", "en": "DC cannot pass a capacitor (it fills up and the current stops), but AC keeps charging it one way and then the other, so current flows through the bulb all the time, although no charge ever crosses the insulator."}, "try": {"th": "เปลี่ยนแหล่งจ่ายเป็นถ่าน DC 10 V ทายก่อนว่าหลอดเป็นอย่างไร (สว่างแวบเดียวแล้วดับ)", "en": "Swap the source for a 10 V DC battery. Predict the bulb first (one quick flash, then dark)."}, "quiz": {"q": {"th": "หลอดไฟในวงจรนี้เป็นอย่างไร", "en": "What does the bulb do here?"}, "opts": [{"th": "ติด และกะพริบตามไฟสลับ", "en": "It lights, pulsing with the AC"}, {"th": "ดับตลอด เพราะตัวเก็บประจุกั้นไว้", "en": "It stays dark: the capacitor blocks it"}, {"th": "สว่างแวบเดียวแล้วดับ", "en": "One flash, then dark"}, {"th": "ระเบิด", "en": "It explodes"}], "hint": {"th": "ตัวเก็บประจุกั้นกระแสเมื่อมันชาร์จเต็ม แต่ไฟสลับกลับทิศทุกครึ่งคาบ มันมีโอกาสเต็มค้างอยู่ไหม", "en": "A capacitor blocks current once it is full. But AC reverses every half cycle: does it ever stay full?"}, "why": {"th": "ไฟสลับชาร์จกลับไปกลับมาตลอด กระแสจึงไหลผ่านหลอดได้", "en": "AC keeps charging it back and forth, so current keeps flowing through the bulb."}}},
+{"id": "rect", "cat": "semi", "preset": "rect", "desc": {"th": "ไฟสลับ 10 V ผ่านไดโอดไปยังหลอด 50 Ω", "en": "10 V AC through a diode into a 50 Ω bulb."}, "idea": {"th": "ไดโอดเป็นประตูทางเดียว ครึ่งคาบที่แรงดันดันไปตามลูกศร กระแสไหล ครึ่งคาบที่สวนทาง ไดโอดปิด หลอดจึงติดครึ่งเวลา และกระแสไหลทางเดียวเสมอ", "en": "The diode is a one-way gate. In the half cycle that pushes along its arrow, current flows; in the other half it shuts. The bulb is lit half the time, and the current only ever goes one way."}, "try": {"th": "หมุนไดโอดให้กลับด้าน ทายก่อนว่าหลอดยังติดไหม และติดช่วงไหน (ยังติด แต่ไปติดอีกครึ่งคาบ)", "en": "Turn the diode around. Does the bulb still light, and when? (Yes, in the other half cycle.)"}, "quiz": {"q": {"th": "ครึ่งคาบที่ไดโอดปิด โวลต์มิเตอร์คร่อมหลอดอ่านได้เท่าไร", "en": "During the half cycle when the diode is off, what does the voltmeter across the bulb read?"}, "opts": [{"th": "0 V", "en": "0 V"}, {"th": "−10 V", "en": "−10 V"}, {"th": "10 V", "en": "10 V"}, {"th": "5 V", "en": "5 V"}], "hint": {"th": "ถ้าไม่มีกระแสผ่านหลอด V = IR ของหลอดจะเป็นเท่าไร", "en": "With no current through the bulb, what is the bulb's V = IR?"}, "why": {"th": "ไม่มีกระแส หลอดจึงไม่มีแรงดันคร่อม 0 V แรงดันทั้งหมดไปตกที่ไดโอดแทน", "en": "No current, so no voltage across the bulb: 0 V. The whole voltage sits across the diode instead."}}},
+{"id": "led", "cat": "semi", "preset": "led", "desc": {"th": "LED สีแดงต่ออนุกรมกับตัวต้านทาน 150 Ω และถ่าน 5 V", "en": "A red LED in series with 150 Ω on 5 V."}, "idea": {"th": "LED ต้องการแรงดันราว 2 V จึงเริ่มนำไฟ ส่วนที่เหลือราว 3 V ตกคร่อมตัวต้านทาน กระแสจึงเป็น (5 − 2)/150 ≈ 20 mA ตัวต้านทานคือตัวจำกัดกระแสไม่ให้ LED ไหม้", "en": "The LED needs about 2 V before it conducts; the other 3 V or so falls across the resistor, so the current is (5 − 2)/150 ≈ 20 mA. The resistor limits the current so the LED does not burn."}, "try": {"th": "เปลี่ยนสี LED เป็นสีฟ้า ทายก่อนว่ากระแสมากขึ้นหรือน้อยลง (น้อยลง เพราะสีฟ้าต้องการราว 3 V)", "en": "Make the LED blue. More or less current? (Less: blue needs about 3 V.)"}, "quiz": {"q": {"th": "แอมมิเตอร์อ่านได้ประมาณเท่าไร", "en": "About what does the ammeter read?"}, "opts": [{"th": "20 mA", "en": "20 mA"}, {"th": "33 mA", "en": "33 mA"}, {"th": "0 A", "en": "0 A"}, {"th": "2 A", "en": "2 A"}], "hint": {"th": "ถ้าตัวต้านทานได้แรงดันเต็ม 5 V จะได้ 33 mA แต่ LED ก็ใช้แรงดันไปส่วนหนึ่งด้วย เหลือให้ตัวต้านทานเท่าไร", "en": "If the resistor got the full 5 V it would be 33 mA, but the LED takes part of the voltage too. How much is left for the resistor?"}, "why": {"th": "(5 − 2)/150 ≈ 20 mA", "en": "(5 − 2)/150 ≈ 20 mA"}}},
+{"id": "bridge_smooth", "cat": "semi", "code": "CIRCUIT v1 ideal=1\nAC  2,10 2,8   E=10 f=5 name=E\nD   6,6 8,6    name=D1\nD   6,4 6,6    name=D3\nD   6,12 8,12  name=D2\nD   6,14 6,12  name=D4\nVM  10,7 12,7  name=V_out\nR   10,9 12,9  R=100 name=R_L\nC   10,11 12,11 C=10000 name=C1\nW   2,8 2,6 6,6\nW   2,10 2,12 6,12\nW   8,6 8,12\nW   6,4 6,2 12,2 12,16 6,16 6,14\nW   8,7 10,7\nW   8,9 10,9\nW   8,11 10,11", "title": {"th": "เรียงกระแสเต็มคลื่นแบบบริดจ์", "en": "Bridge rectifier with smoothing"}, "desc": {"th": "ไดโอดสี่ตัวต่อเป็นบริดจ์ เปลี่ยนไฟสลับ 10 V 5 Hz เป็นไฟตรง มีตัวเก็บประจุ 10,000 µF ช่วยให้เรียบ", "en": "Four diodes in a bridge turn 10 V, 5 Hz AC into DC, smoothed by a 10,000 µF capacitor."}, "idea": {"th": "ไม่ว่าแหล่งจ่ายจะหันขั้วไหน ไดโอดสองตัวจะนำไฟพาให้กระแสผ่านโหลดไปทางเดียวเสมอ ได้ไฟตรงทั้งสองครึ่งคาบ ตัวเก็บประจุเก็บประจุไว้ตอนยอดคลื่นแล้วจ่ายต่อตอนแรงดันตก V_out จึงเกือบนิ่งใกล้ 10 V", "en": "Whichever way the source points, two of the diodes conduct and steer the current through the load the same way, so both half cycles give DC. The capacitor stores charge at each peak and gives it back in between, so V_out stays near 10 V."}, "try": {"th": "พักการทำงานตัวเก็บประจุ C1 ทายก่อนว่า V_out จะเป็นอย่างไร (กระเพื่อมขึ้นลงระหว่าง 0 ถึง 10 V)", "en": "Disable C1. Predict V_out first (it bumps between 0 and 10 V)."}, "quiz": {"q": {"th": "ตอนที่แหล่งจ่ายกำลังจ่ายกระแส มีไดโอดนำไฟพร้อมกันกี่ตัว", "en": "While the source is supplying current, how many diodes conduct at once?"}, "opts": [{"th": "2 ตัว", "en": "2"}, {"th": "1 ตัว", "en": "1"}, {"th": "4 ตัว", "en": "4"}, {"th": "3 ตัว", "en": "3"}], "hint": {"th": "กระแสต้องออกจากแหล่งจ่าย ผ่านโหลด แล้วกลับเข้าแหล่งจ่าย ขาไปผ่านไดโอดหนึ่งตัว แล้วขากลับล่ะ", "en": "The current has to leave the source, cross the load and come back. One diode on the way out, and on the way back?"}, "why": {"th": "ขาไปหนึ่งตัว ขากลับอีกหนึ่งตัว รวมสองตัว อีกสองตัวถูกไบแอสกลับ", "en": "One diode on the way out and one on the way back: two. The other two are reverse-biased."}}},
+{"id": "led_colors", "cat": "semi", "code": "CIRCUIT v1 ideal=1\nDC  2,10 2,8   E=5 name=E\nR   7,4 7,6    R=150\nR   11,4 11,6  R=150\nR   15,4 15,6  R=150\nLED 7,9 7,11   color=red\nLED 11,9 11,11 color=green\nLED 15,9 15,11 color=blue\nW   2,8 2,3 15,3 15,4\nW   7,3 7,4\nW   11,3 11,4\nW   7,6 7,9\nW   11,6 11,9\nW   15,6 15,9\nW   7,11 7,14\nW   11,11 11,14\nW   15,11 15,14 2,14 2,10", "title": {"th": "LED สามสี", "en": "Three LED colours"}, "desc": {"th": "LED สีแดง เขียว และฟ้า แต่ละดวงมีตัวต้านทาน 150 Ω ของตัวเอง ต่อขนานกับถ่าน 5 V", "en": "Red, green and blue LEDs, each with its own 150 Ω resistor, in parallel on 5 V."}, "idea": {"th": "LED แต่ละสีต้องการแรงดันไม่เท่ากัน แดงราว 1.9 V เขียวราว 2.2 V ฟ้าราว 3 V ตัวต้านทานได้แรงดันส่วนที่เหลือไม่เท่ากัน LED สีฟ้าจึงได้กระแสน้อยที่สุด (5 − 3)/150 ≈ 13 mA", "en": "Each colour needs a different voltage: red about 1.9 V, green about 2.2 V, blue about 3 V. Each resistor gets what is left, so the blue LED carries the least current: (5 − 3)/150 ≈ 13 mA."}, "try": {"th": "เปลี่ยนถ่านเป็น 3 V ทายก่อนว่า LED สีไหนแทบดับ (สีฟ้า)", "en": "Lower the battery to 3 V. Which LED almost goes out? (The blue one.)"}, "quiz": {"q": {"th": "LED สีไหนได้กระแสน้อยที่สุด", "en": "Which LED carries the least current?"}, "opts": [{"th": "ฟ้า", "en": "Blue"}, {"th": "แดง", "en": "Red"}, {"th": "เขียว", "en": "Green"}, {"th": "เท่ากันหมด", "en": "All the same"}], "hint": {"th": "แรงดัน 5 V แบ่งระหว่าง LED กับตัวต้านทานของมัน ถ้า LED ใช้แรงดันไปมาก ตัวต้านทานจะเหลือแรงดันเท่าไร", "en": "The 5 V is split between each LED and its resistor. If the LED takes a lot, how much is left for the resistor?"}, "why": {"th": "สีฟ้าใช้แรงดันมากที่สุด ตัวต้านทานของมันเหลือแค่ราว 2 V กระแส ≈ 13 mA น้อยที่สุด", "en": "Blue takes the most voltage, leaving only about 2 V for its resistor: ≈ 13 mA, the least."}}},
+{"id": "led_blink", "cat": "semi", "code": "CIRCUIT v1 ideal=1\nAC  2,10 2,8   E=6 f=1 name=E\nR   5,3 7,3    R=100 name=R\nLED 10,8 10,10 color=red\nLED 14,10 14,8 color=green\nW   2,8 2,3 5,3\nW   7,3 14,3 14,8\nW   10,3 10,8\nW   10,10 10,13\nW   14,10 14,13 2,13 2,10", "title": {"th": "LED สองดวงกับไฟสลับ", "en": "Two LEDs on AC"}, "desc": {"th": "LED สีแดงกับสีเขียวต่อขนานกันแบบหันสวนกัน ป้อนไฟสลับ 6 V 1 Hz ผ่าน R 100 Ω", "en": "A red and a green LED side by side, facing opposite ways, on 6 V peak, 1 Hz AC through 100 Ω."}, "idea": {"th": "ครึ่งคาบแรกแรงดันดันไปตามลูกศรของ LED สีแดง ครึ่งคาบหลังกลับทิศ ไปตามลูกศรของสีเขียว LED จึงติดสลับกันทีละดวง ทำให้เห็นทิศของกระแสด้วยตา", "en": "In one half cycle the voltage pushes along the red LED's arrow; in the next it reverses and pushes along the green one's. They take turns, so you can see which way the current flows."}, "try": {"th": "เปลี่ยน f เป็น 20 Hz ทายก่อนว่าจะเห็นอะไร (กะพริบเร็วจนดูเหมือนติดทั้งคู่)", "en": "Set f to 20 Hz. What will you see? (They flicker so fast that both look lit.)"}, "quiz": {"q": {"th": "LED สองดวงติดพร้อมกันได้ไหม", "en": "Can both LEDs be lit at the same moment?"}, "opts": [{"th": "ไม่ได้ ติดทีละดวง", "en": "No, one at a time"}, {"th": "ได้ ติดพร้อมกันตลอด", "en": "Yes, always together"}, {"th": "ดับทั้งคู่ตลอด", "en": "Both stay off"}, {"th": "ติดแค่สีแดง", "en": "Only the red one lights"}], "hint": {"th": "LED แต่ละดวงยอมให้กระแสไหลทางเดียว และสองดวงนี้หันสวนกัน ในขณะหนึ่งกระแสไหลได้กี่ทิศ", "en": "Each LED passes current one way only, and these two face opposite ways. At any moment, how many directions can the current have?"}, "why": {"th": "ขณะหนึ่งกระแสมีทิศเดียว จึงผ่านได้แค่ LED ที่หันตามทิศนั้น", "en": "At any moment the current has one direction, so only the LED facing that way conducts."}}},
+{"id": "diode_reverse", "cat": "semi", "code": "CIRCUIT v1 ideal=1\nDC  2,10 2,8   E=9 name=E\nD   8,3 6,3    name=D1\nVM  8,5 6,5    name=V_D\nB   12,8 12,10 R=20 name=B1\nAM  12,11 12,13 name=I\nW   2,8 2,3 6,3\nW   6,3 6,5\nW   8,3 8,5\nW   8,3 12,3 12,8\nW   12,10 12,11\nW   12,13 12,15 2,15 2,10", "title": {"th": "ไดโอดกลับขั้ว", "en": "A reversed diode"}, "desc": {"th": "ไดโอดหันลูกศรสวนทางกระแสจากถ่าน 9 V มีโวลต์มิเตอร์ V_D คร่อมไดโอด", "en": "A diode pointing against the 9 V battery, with voltmeter V_D across it."}, "idea": {"th": "ไดโอดที่กลับขั้ว (ไบแอสกลับ) ไม่นำไฟ จึงเหมือนสวิตช์ที่ตัด กระแสเป็น 0 แรงดันทั้ง 9 V ของถ่านไปตกคร่อมไดโอด V_D อ่าน −9 V เพราะขั้ว + ของมิเตอร์อยู่ฝั่งศักย์ต่ำ", "en": "A reverse-biased diode does not conduct, so it acts like an open switch: no current, and the battery's whole 9 V appears across it. V_D reads −9 V because the meter's + side is on the low side."}, "try": {"th": "หมุนไดโอดให้กลับด้าน ทายก่อนว่า V_D และ I อ่านเท่าไร (0 V และ 0.45 A ในโหมดอุดมคติ)", "en": "Turn the diode around. Predict V_D and I (0 V and 0.45 A in ideal mode)."}, "quiz": {"q": {"th": "แอมมิเตอร์ I อ่านได้เท่าไร", "en": "What does ammeter I read?"}, "opts": [{"th": "0 A", "en": "0 A"}, {"th": "0.45 A", "en": "0.45 A"}, {"th": "0.42 A", "en": "0.42 A"}, {"th": "−0.45 A", "en": "−0.45 A"}], "hint": {"th": "ลูกศรของไดโอดชี้ทางเดียวที่กระแสไหลได้ กระแสจากขั้วบวกต้องวิ่งตามลูกศรหรือสวนลูกศร", "en": "The diode's arrow shows the only way current may go. Does the current from + have to run with the arrow or against it?"}, "why": {"th": "กระแสต้องวิ่งสวนลูกศร ไดโอดจึงปิด I = 0", "en": "The current would have to run against the arrow, so the diode stays shut: I = 0."}}},
+{"id": "trans", "cat": "tr", "preset": "trans", "desc": {"th": "หม้อแปลงอัตราส่วน 1:2 รับไฟสลับ 10 V แล้วจ่ายให้ตัวต้านทาน 50 Ω", "en": "A 1:2 transformer takes 10 V AC and feeds a 50 Ω resistor."}, "idea": {"th": "ขดทุติยภูมิมีจำนวนรอบเป็น 2 เท่า แรงดันจึงเป็น 2 เท่า V_2 = 20 V (ค่าสูงสุด) โหลดได้ I_L = 20/50 = 0.4 A กำลังเข้าต้องเท่ากับกำลังออก ขดปฐมภูมิจึงดึง I_P = 0.8 A", "en": "The secondary has twice the turns, so twice the voltage: V_2 = 20 V peak. The load takes I_L = 20/50 = 0.4 A. Power in equals power out, so the primary draws I_P = 0.8 A."}, "try": {"th": "เปลี่ยน n เป็น 0.5 ทายก่อนว่า V_2 และ I_P เป็นเท่าไร (5 V และ 0.05 A)", "en": "Set n to 0.5. Predict V_2 and I_P first (5 V and 0.05 A)."}, "quiz": {"q": {"th": "ค่าสูงสุดของ I_P ประมาณเท่าไร", "en": "About how high does I_P peak?"}, "opts": [{"th": "0.8 A", "en": "0.8 A"}, {"th": "0.4 A", "en": "0.4 A"}, {"th": "0.2 A", "en": "0.2 A"}, {"th": "0 A", "en": "0 A"}], "hint": {"th": "หม้อแปลงอุดมคติไม่เสียพลังงาน V_P × I_P ต้องเท่ากับ V_2 × I_L ฝั่งเข้ามีแรงดันครึ่งเดียว กระแสฝั่งเข้าต้องเป็นเท่าไร", "en": "An ideal transformer loses nothing: V_P × I_P = V_2 × I_L. The input has half the voltage, so what must its current be?"}, "why": {"th": "10 × I_P = 20 × 0.4 ได้ I_P = 0.8 A", "en": "10 × I_P = 20 × 0.4, so I_P = 0.8 A."}}},
+{"id": "step_down", "cat": "tr", "code": "CIRCUIT v1 ideal=1\nAC  3,5 3,3    E=20 f=2 name=E\nAM  4,2 6,2    name=I_P\nTP  7,5 9,5    grp=1 n=0.5 name=T1\nTS  7,6 9,6    grp=1\nAM  14,8 14,10 name=I_L\nR   14,12 14,14 R=10 name=R\nVM  18,12 18,14 name=V_2\nGND 1,5 1,7\nW   3,3 3,2 4,2\nW   6,2 7,2 7,5\nW   3,5 1,5 1,1 11,1 11,5 9,5\nW   9,6 9,8 14,8\nW   14,10 14,12\nW   14,14 14,16 7,16 7,6\nW   14,12 18,12\nW   14,14 18,14", "title": {"th": "หม้อแปลงลดแรงดัน", "en": "Step-down transformer"}, "desc": {"th": "หม้อแปลงอัตราส่วน 2:1 (n = 0.5) ลดไฟสลับ 20 V เหลือ 10 V ให้ตัวต้านทาน 10 Ω", "en": "A 2:1 transformer (n = 0.5) steps 20 V AC down to 10 V for a 10 Ω resistor."}, "idea": {"th": "แรงดันลดลงตามจำนวนรอบ V_2 = 0.5 × 20 = 10 V แต่กระแสกลับกัน ฝั่งโหลดได้ I_L = 1 A ส่วนฝั่งเข้าดึงแค่ I_P = 0.5 A เหมือนเฟืองทดที่แลกแรงกับความเร็ว", "en": "The voltage drops with the turns, V_2 = 0.5 × 20 = 10 V, but the current goes the other way: the load gets I_L = 1 A while the input draws only I_P = 0.5 A, like gears trading speed for force."}, "try": {"th": "ลด R เป็น 5 Ω ทายก่อนว่า I_P สูงสุดเป็นเท่าไร (1 A)", "en": "Lower R to 5 Ω. Predict the peak of I_P first (1 A)."}, "quiz": {"q": {"th": "ค่าสูงสุดของ V_2 เท่าไร", "en": "What is the peak of V_2?"}, "opts": [{"th": "10 V", "en": "10 V"}, {"th": "20 V", "en": "20 V"}, {"th": "40 V", "en": "40 V"}, {"th": "5 V", "en": "5 V"}], "hint": {"th": "n = N₂/N₁ = 0.5 แปลว่าขดออกมีรอบเป็นครึ่งหนึ่งของขดเข้า และแรงดันต่อรอบเท่ากันทั้งสองขด", "en": "n = N₂/N₁ = 0.5 means the output coil has half the turns, and both coils have the same voltage per turn."}, "why": {"th": "V_2 = n × V_1 = 0.5 × 20 = 10 V", "en": "V_2 = n × V_1 = 0.5 × 20 = 10 V"}}},
+{"id": "boom", "cat": "real", "preset": "boom", "desc": {"th": "ตัวต้านทาน 10 Ω พิกัด 2 W ต่อกับถ่าน 9 V ผ่านสวิตช์ที่ตัดอยู่ (โหมดจริง)", "en": "A 10 Ω, 2 W resistor on a 9 V battery through an open switch (real mode)."}, "idea": {"th": "เมื่อแตะสวิตช์ กระแสราว 9/10.6 ≈ 0.85 A ทำให้ P = I²R ≈ 7 W เกินพิกัด 2 W ไปมาก ตัวต้านทานร้อนขึ้นเรื่อยๆ จนถึง 200 °C แล้วไหม้และระเบิด", "en": "Tap the switch: about 9/10.6 ≈ 0.85 A flows and P = I²R ≈ 7 W, far over the 2 W rating. The resistor heats up until it reaches 200 °C, then burns out and explodes."}, "try": {"th": "เปลี่ยน R เป็น 47 Ω แล้วแตะสวิตช์ ทายก่อนว่ายังระเบิดไหม (ไม่ระเบิด P ≈ 1.7 W)", "en": "Set R to 47 Ω and close the switch. Does it still explode? (No: P ≈ 1.7 W.)"}, "quiz": {"q": {"th": "ทำไมตัวต้านทานจึงระเบิด", "en": "Why does the resistor explode?"}, "opts": [{"th": "กำลัง I²R เกินพิกัด 2 W", "en": "The power I²R goes over its 2 W rating"}, {"th": "แรงดันเกิน 9 V", "en": "The voltage goes over 9 V"}, {"th": "กระแสไหลกลับทิศ", "en": "The current reverses"}, {"th": "สวิตช์ลัดวงจร", "en": "The switch shorts it"}], "hint": {"th": "พิกัดของตัวต้านทานบอกเป็นวัตต์ ลองคำนวณ P = I²R ด้วยกระแสราว 0.85 A แล้วเทียบกับ 2 W", "en": "A resistor's rating is in watts. Work out P = I²R with about 0.85 A and compare it with 2 W."}, "why": {"th": "P = 0.85² × 10 ≈ 7 W เกิน 2 W ราว 3.5 เท่า", "en": "P = 0.85² × 10 ≈ 7 W, about 3.5 times the 2 W rating."}}},
+{"id": "fuse", "cat": "real", "preset": "fuse", "desc": {"th": "หลอด 24 Ω ต่อกับถ่าน 12 V ผ่านฟิวส์ 2 A มีสวิตช์คร่อมหลอดไว้สำหรับทำให้ลัดวงจร (โหมดจริง)", "en": "A 24 Ω bulb on 12 V through a 2 A fuse, with a switch across the bulb to cause a short (real mode)."}, "idea": {"th": "ปกติหลอดใช้ 0.5 A ฟิวส์อยู่สบาย พอแตะสวิตช์ กระแสลัดผ่านสวิตช์ได้หลายสิบแอมป์ เพราะเหลือแค่ความต้านทานภายในถ่าน ฟิวส์ร้อนจนขาดในเสี้ยววินาที ตัดวงจรก่อนถ่านหรือสายไฟจะเสียหาย", "en": "Normally the bulb takes 0.5 A and the fuse is fine. Tap the switch: tens of amps rush through it, since only the battery's internal resistance is left, and the fuse melts within a fraction of a second, cutting the circuit before the battery or the wires are damaged."}, "try": {"th": "เปลี่ยนพิกัดฟิวส์เป็น 30 A แล้วแตะสวิตช์ ทายก่อนว่าอะไรเสียหายแทน (ถ่านร้อนจนระเบิด)", "en": "Raise the fuse to 30 A and close the switch. What gets damaged instead? (The battery overheats and explodes.)"}, "quiz": {"q": {"th": "ตอนลัดวงจร ทำไมฟิวส์ขาดก่อนอย่างอื่น", "en": "During the short, why does the fuse blow first?"}, "opts": [{"th": "มันถูกทำให้ทนกระแสได้น้อยที่สุดในวงจร", "en": "It is made to take the least current in the circuit"}, {"th": "มันมีความต้านทานสูงที่สุด", "en": "It has the highest resistance"}, {"th": "มันอยู่ใกล้ถ่านที่สุด", "en": "It is closest to the battery"}, {"th": "กระแสในฟิวส์มากกว่าที่อื่น", "en": "More current flows in it than elsewhere"}], "hint": {"th": "ในทางเดินเดียวกัน กระแสเท่ากันทุกจุด ถ้ากระแสเท่ากัน อะไรทำให้ชิ้นหนึ่งพังก่อนชิ้นอื่น", "en": "Along one path the current is the same everywhere. With the same current, what makes one part fail before the others?"}, "why": {"th": "ฟิวส์มีพิกัดต่ำที่สุดโดยตั้งใจ จึงขาดก่อนเสมอ", "en": "The fuse has the lowest rating on purpose, so it always goes first."}}},
+{"id": "short", "cat": "real", "preset": "short", "desc": {"th": "เหมือนวงจรฟิวส์แต่ไม่มีฟิวส์ มีสวิตช์คร่อมหลอดไว้ (โหมดจริง)", "en": "Like the fuse circuit but with no fuse; a switch sits across the bulb (real mode)."}, "idea": {"th": "แตะสวิตช์ กระแสวิ่งผ่านสวิตช์แทนหลอด เหลือแค่ความต้านทานภายในถ่าน 0.5 Ω กระแสพุ่งถึงราว 18 A ความร้อนในถ่าน P = I²r ≈ 160 W เกินพิกัดมาก ถ่านร้อนจัดจนระเบิด", "en": "Tap the switch: the current takes the switch instead of the bulb, and only the battery's 0.5 Ω is left. About 18 A flows, heating the battery with P = I²r ≈ 160 W, far over its rating, until it explodes."}, "try": {"th": "เพิ่มฟิวส์ 2 A อนุกรมกับถ่านแล้วลองใหม่ ทายก่อนว่าถ่านรอดไหม (รอด ฟิวส์ขาดก่อน)", "en": "Add a 2 A fuse in series with the battery and try again. Does the battery survive? (Yes, the fuse blows first.)"}, "quiz": {"q": {"th": "ตอนสวิตช์ต่อ หลอดไฟเป็นอย่างไร", "en": "With the switch closed, what does the bulb do?"}, "opts": [{"th": "ดับ เพราะกระแสอ้อมผ่านสวิตช์", "en": "It goes dark: the current bypasses it through the switch"}, {"th": "สว่างขึ้นมาก", "en": "It gets much brighter"}, {"th": "สว่างเท่าเดิม", "en": "It stays the same"}, {"th": "ระเบิด", "en": "It explodes"}], "hint": {"th": "สวิตช์ที่ต่อแทบไม่มีความต้านทาน และมันคร่อมหลอดอยู่พอดี แรงดันคร่อมหลอดจึงเหลือเท่าไร", "en": "A closed switch has almost no resistance and sits right across the bulb. So what voltage is left across the bulb?"}, "why": {"th": "สวิตช์ลัดหลอดไว้ หลอดได้แรงดันเกือบ 0 จึงดับ ส่วนถ่านรับกระแสมหาศาลแทน", "en": "The switch shorts the bulb, which gets almost no voltage and goes dark, while the battery takes a huge current."}}},
+{"id": "led_burn", "cat": "real", "code": "CIRCUIT v1 ideal=0\nDC  2,10 2,8   E=9 r=0.5 name=E\nAM  6,3 8,3    name=I\nLED 10,8 10,10\nW   2,8 2,3 6,3\nW   8,3 10,3 10,8\nW   10,10 10,13 2,13 2,10", "title": {"th": "LED ไม่มีตัวต้านทาน", "en": "An LED with no resistor"}, "desc": {"th": "LED ต่อตรงกับถ่าน 9 V ไม่มีตัวต้านทานจำกัดกระแส (โหมดจริง)", "en": "An LED straight across a 9 V battery, with no resistor to limit the current (real mode)."}, "idea": {"th": "LED ต้องการแค่ราว 2 V ส่วนที่เหลือไม่มีอะไรรับไว้ กระแสจึงพุ่งหลายแอมป์ ทั้งที่ LED ทนได้ราว 20 mA มันจึงไหม้ทันทีที่เริ่มจำลอง", "en": "An LED only needs about 2 V and nothing takes up the rest, so several amps rush through a part made for about 20 mA. It burns out the moment the simulation starts."}, "try": {"th": "เพิ่มตัวต้านทาน 330 Ω อนุกรม แล้วซ่อม LED ทายก่อนว่ากระแสเป็นเท่าไร (ราว 21 mA)", "en": "Add a 330 Ω resistor in series and repair the LED. Predict the current first (about 21 mA)."}, "quiz": {"q": {"th": "ทำไม LED จึงไหม้", "en": "Why does the LED burn out?"}, "opts": [{"th": "ไม่มีอะไรจำกัดกระแส", "en": "Nothing limits the current"}, {"th": "แรงดันกลับขั้ว", "en": "The voltage is reversed"}, {"th": "LED ใช้กับไฟตรงไม่ได้", "en": "LEDs cannot run on DC"}, {"th": "ถ่านหมด", "en": "The battery is flat"}], "hint": {"th": "ถ้า LED ใช้แรงดันแค่ราว 2 V อีก 7 V ไปตกคร่อมอะไร เมื่อไม่มีตัวต้านทาน", "en": "If the LED takes only about 2 V, what takes the other 7 V when there is no resistor?"}, "why": {"th": "ไม่มีตัวต้านทาน 7 V ที่เหลือดันกระแสหลายแอมป์ผ่าน LED", "en": "With no resistor, the leftover 7 V drives several amps through the LED."}}},
+{"id": "cap_burst", "cat": "real", "code": "CIRCUIT v1 ideal=0\nDC  2,10 2,8   E=12 name=E\nR   5,3 7,3    R=100 Pmax=10 name=R\nC   11,8 11,10 C=1000 Vmax=6 name=C1\nVM  14,8 14,10 name=V_C\nW   2,8 2,3 5,3\nW   7,3 11,3 11,8\nW   11,8 14,8\nW   11,10 14,10\nW   11,10 11,13 2,13 2,10", "title": {"th": "ตัวเก็บประจุเกินพิกัดแรงดัน", "en": "A capacitor over its voltage rating"}, "desc": {"th": "ตัวเก็บประจุพิกัด 6 V ถูกชาร์จด้วยถ่าน 12 V ผ่าน R 100 Ω (โหมดจริง)", "en": "A 6 V-rated capacitor charged from 12 V through 100 Ω (real mode)."}, "idea": {"th": "แรงดันของตัวเก็บประจุไต่ขึ้นหา 12 V แต่ฉนวนข้างในทนได้แค่ 6 V พอเกินพิกัด ฉนวนเริ่มพัง ร้อนขึ้น แล้วตัวเก็บประจุระเบิด", "en": "The capacitor voltage climbs toward 12 V, but its insulation only takes 6 V. Once over the rating the insulation starts to fail, heats up, and the capacitor bursts."}, "try": {"th": "เปลี่ยน Vmax เป็น 16 V แล้วซ่อม ทายก่อนว่าแรงดันสุดท้ายเป็นเท่าไร (12 V และไม่ระเบิด)", "en": "Set Vmax to 16 V and repair it. Predict the final voltage first (12 V, no burst)."}, "quiz": {"q": {"th": "ควรเลือกตัวเก็บประจุพิกัดแรงดันเท่าไร สำหรับถ่าน 12 V", "en": "What voltage rating should a capacitor on a 12 V battery have?"}, "opts": [{"th": "มากกว่า 12 V เช่น 16 V", "en": "More than 12 V, e.g. 16 V"}, {"th": "6 V ก็พอ", "en": "6 V is enough"}, {"th": "น้อยกว่า 12 V", "en": "Less than 12 V"}, {"th": "ไม่สำคัญ", "en": "It does not matter"}], "hint": {"th": "เมื่อชาร์จเต็ม แรงดันของตัวเก็บประจุเท่ากับแรงดันของถ่าน พิกัดต้องสูงกว่าหรือต่ำกว่าค่านั้น", "en": "Fully charged, the capacitor sits at the battery voltage. Must its rating be above or below that?"}, "why": {"th": "ชาร์จเต็มได้ 12 V พิกัดต้องสูงกว่า 12 V และเผื่อไว้ด้วย", "en": "Fully charged it reaches 12 V, so the rating must be above 12 V, with some margin."}}}
+];
+// lesson extras for the circuits and ideas of knowledge.js: an everyday comparison (ana) and a quiz (first option right)
+const LESSON = {
+  "circ": {
+    "series": {"ana": {"th": "เหมือนท่อน้ำเส้นเดียวที่มีก๊อกสองตัวต่อกัน น้ำต้องผ่านทั้งสองตัว และไหลเท่ากันตลอดเส้น", "en": "Like one water pipe with two taps in a row: the water must pass both, and the flow is the same all along."}, "quiz": {"q": {"th": "โวลต์มิเตอร์ V_R2 อ่านได้เท่าไร", "en": "What does voltmeter V_R2 read?"}, "opts": [{"th": "6 V", "en": "6 V"}, {"th": "3 V", "en": "3 V"}, {"th": "9 V", "en": "9 V"}, {"th": "4.5 V", "en": "4.5 V"}], "hint": {"th": "กระแสเท่ากันในตัวต้านทานทั้งสอง และ R2 ใหญ่กว่า R1 สองเท่า แรงดันของมันควรเท่ากับของ R1 ไหม", "en": "The same current flows in both resistors, and R2 is twice R1. Should its voltage equal R1's?"}, "why": {"th": "V = IR = 0.03 × 200 = 6 V", "en": "V = IR = 0.03 × 200 = 6 V"}}},
+    "parallel": {"ana": {"th": "เหมือนถนนที่แยกเป็นหลายเลนแล้วมาบรรจบกัน รถในทุกเลนรวมกันเท่ากับรถบนถนนหลัก", "en": "Like a road that splits into lanes and joins again: the cars in all the lanes add up to the cars on the main road."}, "quiz": {"q": {"th": "แอมมิเตอร์ I_total อ่านได้เท่าไร", "en": "What does ammeter I_total read?"}, "opts": [{"th": "0.5 A", "en": "0.5 A"}, {"th": "0.3 A", "en": "0.3 A"}, {"th": "0.1 A", "en": "0.1 A"}, {"th": "0.25 A", "en": "0.25 A"}], "hint": {"th": "กระแส I_1 กับ I_2 มาจากไหน ทั้งคู่ต้องผ่าน I_total ก่อนจะแยกสาขาไหม", "en": "Where do I_1 and I_2 come from? Don't both pass I_total before they split?"}, "why": {"th": "I_total = I_1 + I_2 = 0.3 + 0.2 = 0.5 A", "en": "I_total = I_1 + I_2 = 0.3 + 0.2 = 0.5 A"}}},
+    "mixed": {"ana": {"th": "เหมือนถนนเส้นเดียว (R1) ที่ไปแยกเป็นสองซอย (R2 และ R3) รถทุกคันต้องผ่าน R1 ก่อน แล้วแบ่งกันเข้าซอย", "en": "Like one road (R1) that splits into two lanes (R2 and R3): every car passes R1 first, then they share the lanes."}, "quiz": {"q": {"th": "แอมมิเตอร์ I_2 อ่านได้เท่าไร", "en": "What does ammeter I_2 read?"}, "opts": [{"th": "0.4 A", "en": "0.4 A"}, {"th": "0.6 A", "en": "0.6 A"}, {"th": "0.2 A", "en": "0.2 A"}, {"th": "0.3 A", "en": "0.3 A"}], "hint": {"th": "กระแส 0.6 A แยกเป็นสองสาขา R2 = 30 Ω ต้านน้อยกว่า R3 = 60 Ω สาขาของ R2 ควรได้มากกว่าหรือน้อยกว่าครึ่ง", "en": "The 0.6 A splits into two branches. R2 = 30 Ω resists less than R3 = 60 Ω: should R2's branch get more or less than half?"}, "why": {"th": "V_A = 12 V จึงได้ I_2 = 12/30 = 0.4 A (เป็นสองเท่าของ I_3)", "en": "V_A = 12 V, so I_2 = 12/30 = 0.4 A (twice I_3)."}}},
+    "divider": {"ana": {"th": "เหมือนบันไดสองขั้นที่สูงไม่เท่ากัน ความสูงรวมเท่ากับแรงดันของถ่าน ตัวต้านทานที่มากกว่าคือขั้นที่สูงกว่า", "en": "Like two steps of different heights: together they make the battery's voltage, and the bigger resistor is the taller step."}, "quiz": {"q": {"th": "โวลต์มิเตอร์ V_out อ่านได้เท่าไร", "en": "What does voltmeter V_out read?"}, "opts": [{"th": "4 V", "en": "4 V"}, {"th": "6 V", "en": "6 V"}, {"th": "10 V", "en": "10 V"}, {"th": "5 V", "en": "5 V"}], "hint": {"th": "V_R1 กับ V_out รวมกันต้องเท่ากับ 10 V ของถ่าน ถ้า V_R1 = 6 V จะเหลือให้ V_out เท่าไร", "en": "V_R1 and V_out must add up to the battery's 10 V. If V_R1 = 6 V, what is left for V_out?"}, "why": {"th": "V_out = 10 × 200/500 = 4 V", "en": "V_out = 10 × 200/500 = 4 V"}}},
+    "short_resistor": {"ana": {"th": "เหมือนมีทางเลี่ยงฟรีข้างด่านเก็บเงิน รถทุกคันเลือกทางเลี่ยง ด่านจึงว่างเปล่า", "en": "Like a free bypass next to a toll gate: every car takes the bypass, so the gate sees no one."}, "quiz": {"q": {"th": "แอมมิเตอร์ I_R2 อ่านได้เท่าไร", "en": "What does ammeter I_R2 read?"}, "opts": [{"th": "0 A", "en": "0 A"}, {"th": "0.09 A", "en": "0.09 A"}, {"th": "0.045 A", "en": "0.045 A"}, {"th": "0.03 A", "en": "0.03 A"}], "hint": {"th": "สายที่ลัดคร่อม R2 ไม่มีความต้านทาน แรงดันคร่อม R2 จึงเป็น 0 ถ้า V = 0 แล้ว I = V/R เป็นเท่าไร", "en": "The wire across R2 has no resistance, so the voltage across R2 is 0. With V = 0, what is I = V/R?"}, "why": {"th": "กระแสทั้งหมดไปทางสาย R2 ได้ 0 A", "en": "All the current takes the wire, R2 gets 0 A."}}},
+    "short_source": {"ana": {"th": "เหมือนเปิดก๊อกน้ำที่ไม่มีสายยางต่อเลย น้ำพุ่งออกเต็มแรง ไม่มีอะไรมาชะลอ", "en": "Like opening a tap with no hose: the water gushes out with nothing to slow it."}, "quiz": {"q": {"th": "กระแสลัดวงจรประมาณเท่าไร", "en": "About how large is the short-circuit current?"}, "opts": [{"th": "18 A", "en": "18 A"}, {"th": "9 A", "en": "9 A"}, {"th": "0 A", "en": "0 A"}, {"th": "4.5 A", "en": "4.5 A"}], "hint": {"th": "วงจรเหลือแค่ความต้านทานภายในของถ่าน 0.5 Ω ลองใช้ I = E/r", "en": "Only the battery's internal 0.5 Ω is left in the loop. Try I = E/r."}, "why": {"th": "I = 9/0.5 = 18 A", "en": "I = 9/0.5 = 18 A"}}},
+    "open_switch": {"ana": {"th": "เหมือนสะพานที่ถูกยกขึ้น รถข้ามไม่ได้ ทุกคันต้องจอดนิ่งทั้งเส้นทาง", "en": "Like a raised drawbridge: no car can cross, so traffic stops along the whole road."}, "quiz": {"q": {"th": "โวลต์มิเตอร์ V_S ที่คร่อมสวิตช์ซึ่งตัดอยู่ อ่านได้เท่าไร", "en": "What does voltmeter V_S across the open switch read?"}, "opts": [{"th": "9 V", "en": "9 V"}, {"th": "0 V", "en": "0 V"}, {"th": "4.5 V", "en": "4.5 V"}, {"th": "−9 V", "en": "−9 V"}], "hint": {"th": "ไม่มีกระแส ตัวต้านทานจึงไม่มีแรงดันคร่อม (V = IR = 0) แล้วแรงดัน 9 V ของถ่านไปอยู่ตรงไหน", "en": "With no current, the resistor has no voltage across it (V = IR = 0). So where is the battery's 9 V?"}, "why": {"th": "แรงดันทั้งหมดไปตกคร่อมช่องที่ขาด V_S = 9 V", "en": "The whole voltage sits across the gap: V_S = 9 V."}}},
+    "rc": {"ana": {"th": "เหมือนเติมน้ำใส่ถังผ่านสายยางเล็ก ตอนแรกไหลแรง พอน้ำในถังสูงขึ้นก็ดันสวนกลับ น้ำจึงไหลช้าลงเรื่อยๆ", "en": "Like filling a tank through a thin hose: fast at first, then slower and slower as the water in the tank pushes back."}, "quiz": {"q": {"th": "นานพอแล้ว แอมมิเตอร์ I อ่านได้เท่าไร", "en": "After a long time, what does ammeter I read?"}, "opts": [{"th": "0 A", "en": "0 A"}, {"th": "9 mA", "en": "9 mA"}, {"th": "4.5 mA", "en": "4.5 mA"}, {"th": "1 mA", "en": "1 mA"}], "hint": {"th": "เมื่อ V_C ขึ้นไปเท่ากับแรงดันของถ่าน ความต่างศักย์คร่อมตัวต้านทานเหลือเท่าไร", "en": "When V_C has risen to the battery voltage, what voltage is left across the resistor?"}, "why": {"th": "ชาร์จเต็มแล้ว ไม่มีแรงดันเหลือดันกระแส I = 0", "en": "Fully charged, nothing is left to push current: I = 0."}}},
+    "rl": {"ana": {"th": "เหมือนเข็นล้อหนัก ตอนแรกหมุนยาก ค่อยๆ เร็วขึ้น และพอหมุนแล้วก็หยุดทันทีไม่ได้", "en": "Like pushing a heavy flywheel: hard to start, it speeds up slowly, and once spinning it cannot stop at once."}, "quiz": {"q": {"th": "นานพอแล้ว โวลต์มิเตอร์ V_L อ่านได้เท่าไร", "en": "After a long time, what does voltmeter V_L read?"}, "opts": [{"th": "0 V", "en": "0 V"}, {"th": "9 V", "en": "9 V"}, {"th": "4.5 V", "en": "4.5 V"}, {"th": "0.9 V", "en": "0.9 V"}], "hint": {"th": "ตัวเหนี่ยวนำสร้างแรงดันเมื่อกระแสเปลี่ยน (V_L = L·ΔI/Δt) ถ้ากระแสคงที่แล้ว ΔI = 0 แรงดันจะเป็นเท่าไร", "en": "An inductor makes a voltage only while the current changes (V_L = L·ΔI/Δt). Once the current is steady, ΔI = 0: what is the voltage?"}, "why": {"th": "กระแสคงที่ ตัวเหนี่ยวนำเหมือนสายไฟ V_L = 0", "en": "With a steady current the inductor acts like a wire: V_L = 0."}}},
+    "halfwave": {"ana": {"th": "เหมือนประตูหมุนทางเดียวที่สถานีรถไฟ คนเดินผ่านได้ทางเดียว อีกทางล็อกไว้", "en": "Like a one-way turnstile at a station: people pass one way, the other way is locked."}, "quiz": {"q": {"th": "ครึ่งคาบที่ไดโอดไม่นำไฟ V_R อ่านได้เท่าไร", "en": "In the half cycle when the diode is off, what does V_R read?"}, "opts": [{"th": "0 V", "en": "0 V"}, {"th": "−10 V", "en": "−10 V"}, {"th": "10 V", "en": "10 V"}, {"th": "5 V", "en": "5 V"}], "hint": {"th": "ถ้าไม่มีกระแสผ่านตัวต้านทาน V = IR ของมันจะเป็นเท่าไร", "en": "With no current through the resistor, what is its V = IR?"}, "why": {"th": "ไม่มีกระแส V_R = 0 แรงดันลบทั้งหมดไปอยู่ที่ไดโอด", "en": "No current, so V_R = 0: the negative half sits across the diode."}}},
+    "transformer": {"ana": {"th": "เหมือนเฟืองสองตัวที่ขนาดไม่เท่ากัน ฝั่งหนึ่งได้แรงมาก อีกฝั่งได้ความเร็วมาก แต่งานที่ส่งผ่านเท่ากัน", "en": "Like two gears of different sizes: one side gets more force, the other more speed, but the work passed on is the same."}, "quiz": {"q": {"th": "ค่าสูงสุดของ V_S (ด้านทุติยภูมิ) เท่าไร", "en": "What is the peak of V_S (the secondary)?"}, "opts": [{"th": "20 V", "en": "20 V"}, {"th": "10 V", "en": "10 V"}, {"th": "5 V", "en": "5 V"}, {"th": "40 V", "en": "40 V"}], "hint": {"th": "อัตราส่วน 1:2 แปลว่าขดออกมีรอบเป็นสองเท่า และแรงดันต่อรอบเท่ากันทั้งสองขด", "en": "A 1:2 ratio means the output coil has twice the turns, and both coils have the same voltage per turn."}, "why": {"th": "V_S = 2 × 10 = 20 V", "en": "V_S = 2 × 10 = 20 V"}}},
+    "led": {"ana": {"th": "เหมือนประตูที่ต้องดันแรงพอจึงจะเปิด (ราว 2 V) ตัวต้านทานคือคนคุมทางเข้าที่ปล่อยคนเข้าทีละน้อย ไม่ให้เบียดจนประตูพัง", "en": "Like a door that only opens with a firm push (about 2 V); the resistor is the usher who lets people in a few at a time so the door does not break."}, "quiz": {"q": {"th": "โวลต์มิเตอร์ V_LED อ่านได้ประมาณเท่าไร", "en": "About what does voltmeter V_LED read?"}, "opts": [{"th": "2.2 V", "en": "2.2 V"}, {"th": "9 V", "en": "9 V"}, {"th": "0 V", "en": "0 V"}, {"th": "6.8 V", "en": "6.8 V"}], "hint": {"th": "LED ที่นำไฟมีแรงดันตกคร่อมเกือบคงที่ตามสีของมัน ส่วนที่เหลือไปอยู่ที่ตัวต้านทาน ถ้า LED ได้ 9 V ตัวต้านทานจะเหลือเท่าไร", "en": "A conducting LED has an almost fixed drop that depends on its colour; the rest goes to the resistor. If the LED had 9 V, what would be left for the resistor?"}, "why": {"th": "LED สีเขียวตกราว 2.2 V ตัวต้านทานได้ 6.8 V", "en": "The green LED drops about 2.2 V and the resistor gets 6.8 V."}}},
+    "fuse_blow": {"ana": {"th": "เหมือนจุดอ่อนที่ออกแบบไว้ให้ขาดก่อน แบบเชือกนิรภัยที่ขาดก่อนเครื่องจักรจะพัง", "en": "Like a weak link made to snap first, the way a safety cord breaks before the machine does."}, "quiz": {"q": {"th": "เมื่อฟิวส์ขาดแล้ว การ์ดของ E1 แสดงกระแสเท่าไร", "en": "Once the fuse has blown, what current does E1's card show?"}, "opts": [{"th": "0 A", "en": "0 A"}, {"th": "0.85 A", "en": "0.85 A"}, {"th": "0.5 A", "en": "0.5 A"}, {"th": "18 A", "en": "18 A"}], "hint": {"th": "ฟิวส์ขาดคือวงจรขาดตรงนั้น วงจรนี้มีทางอื่นให้กระแสไหลไหม", "en": "A blown fuse is a break in the circuit. Is there any other path for the current here?"}, "why": {"th": "วงจรมีทางเดียว ฟิวส์ขาดแล้วกระแสเป็น 0 A", "en": "There is only one path, so once the fuse blows the current is 0 A."}}}
+  },
+  "con": {
+    "node": {"ana": {"th": "เหมือนห้องโถงเดียวที่มีหลายประตู ทุกมุมของห้องอยู่ชั้นเดียวกัน ระดับเดียวกัน", "en": "Like one hall with many doors: every corner of the hall is on the same floor, at the same level."}, "quiz": {"q": {"th": "จุดสองจุดที่ต่อกันด้วยสายไฟเปล่าๆ (ไม่มีอุปกรณ์คั่น) มีความต่างศักย์เท่าไร", "en": "Two points joined by a bare wire (no part between them): what is the potential difference?"}, "opts": [{"th": "0 V", "en": "0 V"}, {"th": "เท่ากับแรงดันของถ่าน", "en": "The battery voltage"}, {"th": "ขึ้นกับความยาวสาย", "en": "It depends on the wire length"}, {"th": "ขึ้นกับกระแส", "en": "It depends on the current"}], "hint": {"th": "สายไฟในแผงนี้ไม่มีความต้านทาน V = IR ของสายจึงเป็นเท่าไร ไม่ว่ากระแสจะมากแค่ไหน", "en": "Wires on this board have no resistance. So what is V = IR for a wire, however large the current?"}, "why": {"th": "จุดที่ต่อด้วยสายอยู่ในโหนดเดียวกัน ศักย์เท่ากัน ความต่างศักย์ 0 V", "en": "Points joined by a wire are one node with one potential: 0 V apart."}}},
+    "ground": {"ana": {"th": "เหมือนระดับน้ำทะเลที่ใช้วัดความสูงของภูเขา เลือกจุดศูนย์ไว้หนึ่งจุด แล้ววัดทุกที่เทียบกับมัน", "en": "Like sea level for measuring mountains: pick one zero, then measure everything from it."}, "quiz": {"q": {"th": "ย้ายจุดกราวไปที่อื่นในวงจร อะไรเปลี่ยนไป", "en": "Move the ground somewhere else in the circuit. What changes?"}, "opts": [{"th": "ศักย์ของแต่ละจุด แต่ความต่างศักย์และกระแสเท่าเดิม", "en": "The potential of each point, but not the differences or the currents"}, {"th": "กระแสทุกเส้นเปลี่ยน", "en": "Every current changes"}, {"th": "หลอดไฟสว่างขึ้น", "en": "The bulbs get brighter"}, {"th": "ไม่มีอะไรเปลี่ยนเลย แม้แต่ศักย์", "en": "Nothing at all, not even the potentials"}], "hint": {"th": "กราวคือการเลือกว่าจุดศูนย์ของไม้บรรทัดอยู่ตรงไหน เลื่อนจุดศูนย์แล้วโต๊ะยาวขึ้นไหม", "en": "Ground picks where the ruler's zero is. Move the zero: does the table get longer?"}, "why": {"th": "ศักย์ทุกจุดเลื่อนไปเท่ากัน ความต่างศักย์และกระแสจึงไม่เปลี่ยน", "en": "Every potential shifts by the same amount, so the differences and the currents stay the same."}}},
+    "kcl": {"ana": {"th": "น้ำที่ไหลเข้าทางแยกต้องเท่ากับน้ำที่ไหลออก ไม่มีน้ำหายไปหรือเกิดขึ้นที่ทางแยก", "en": "The water flowing into a junction equals the water flowing out: none appears or vanishes there."}, "quiz": {"q": {"th": "ที่จุดแยก มีกระแสเข้า 0.6 A ออกไปทางหนึ่ง 0.4 A อีกทางออกเท่าไร", "en": "At a junction 0.6 A flows in and 0.4 A leaves one way. How much leaves the other way?"}, "opts": [{"th": "0.2 A", "en": "0.2 A"}, {"th": "0.6 A", "en": "0.6 A"}, {"th": "1 A", "en": "1 A"}, {"th": "0.4 A", "en": "0.4 A"}], "hint": {"th": "ประจุไม่สะสมที่จุดแยก ที่ไหลเข้ามาต้องไหลออกไปให้หมด ถ้าออกอีกทาง 0.6 A รวมจะออกเท่าไร", "en": "Charge does not pile up at a junction: all that comes in must go out. If 0.6 A left the other way, how much would leave in total?"}, "why": {"th": "0.6 = 0.4 + 0.2 A", "en": "0.6 = 0.4 + 0.2 A"}}},
+    "kvl": {"ana": {"th": "เหมือนเดินขึ้นลงเขาเป็นวงแล้วกลับมาที่เดิม ความสูงที่ขึ้นรวมกันเท่ากับที่ลงพอดี", "en": "Like a round hike: you end where you started, so all the climbing equals all the descending."}, "quiz": {"q": {"th": "วงจรอนุกรมมีถ่าน 9 V และตัวต้านทานสองตัว ตัวแรกได้ 3 V ตัวที่สองได้เท่าไร", "en": "A series loop has a 9 V battery and two resistors. The first gets 3 V; what does the second get?"}, "opts": [{"th": "6 V", "en": "6 V"}, {"th": "9 V", "en": "9 V"}, {"th": "3 V", "en": "3 V"}, {"th": "12 V", "en": "12 V"}], "hint": {"th": "เดินรอบลูปแล้วกลับมาที่จุดเดิม แรงดันที่ถ่านยกขึ้นต้องเท่ากับที่ตัวต้านทานลดลงรวมกัน", "en": "Walk around the loop back to the start: what the battery lifts must equal what the resistors drop together."}, "why": {"th": "9 = 3 + 6 V", "en": "9 = 3 + 6 V"}}},
+    "open": {"ana": {"th": "เหมือนสะพานขาด รถข้ามไม่ได้ ไม่ว่าจะดันแรงแค่ไหน", "en": "Like a broken bridge: no car gets across, however hard it pushes."}, "quiz": {"q": {"th": "วงจรอนุกรมขาดที่จุดหนึ่ง กระแสในวงจรนั้นเป็นเท่าไร", "en": "A series circuit is broken at one point. What is the current in it?"}, "opts": [{"th": "0 A ทุกจุด", "en": "0 A everywhere"}, {"th": "0 A เฉพาะหลังจุดที่ขาด", "en": "0 A only after the break"}, {"th": "ลดลงครึ่งหนึ่ง", "en": "Half of before"}, {"th": "เท่าเดิม", "en": "Unchanged"}], "hint": {"th": "ถ้ากระแสยังไหลอยู่ก่อนถึงจุดที่ขาด ประจุจะไปกองอยู่ที่ไหน", "en": "If current still flowed up to the break, where would the charge pile up?"}, "why": {"th": "ประจุสะสมที่จุดขาดไม่ได้ กระแสจึงหยุดทั้งวง", "en": "Charge cannot pile up at the gap, so the current stops all around the loop."}}},
+    "short": {"ana": {"th": "เหมือนมีทางลัดที่ไม่มีด่าน รถทั้งหมดเลือกทางลัด ทางหลักจึงว่างเปล่า", "en": "Like a shortcut with no toll: all the traffic takes it and the main road empties."}, "quiz": {"q": {"th": "ในวงจรหลอดสองดวงต่ออนุกรม ต่อสายไฟคร่อมหลอดดวงหนึ่ง ดวงนั้นเป็นอย่างไร", "en": "In a two-bulb series circuit you put a wire across one bulb. What does that bulb do?"}, "opts": [{"th": "ดับ", "en": "It goes out"}, {"th": "สว่างขึ้น", "en": "It gets brighter"}, {"th": "เท่าเดิม", "en": "No change"}, {"th": "ระเบิด", "en": "It explodes"}], "hint": {"th": "สายไฟไม่มีความต้านทาน แรงดันคร่อมสายจึงเป็น 0 หลอดที่อยู่คร่อมสายเส้นนั้นได้แรงดันเท่าไร", "en": "A wire has no resistance, so the voltage across it is 0. What voltage does the bulb across that wire get?"}, "why": {"th": "หลอดถูกลัด ได้แรงดัน 0 V จึงดับ ส่วนอีกดวงสว่างขึ้น", "en": "The bulb is shorted, gets 0 V and goes out, while the other bulb gets brighter."}}},
+    "series_parallel": {"ana": {"th": "อนุกรมเหมือนตู้รถไฟที่ต่อกันเป็นขบวนเดียว ขนานเหมือนหลายเลนบนถนน", "en": "Series is like train cars in one line; parallel is like lanes on a road."}, "quiz": {"q": {"th": "หลอดเหมือนกันสองดวงกับถ่านก้อนเดียวกัน ต่อแบบไหนสว่างกว่า", "en": "Two identical bulbs on the same battery: which way are they brighter?"}, "opts": [{"th": "ขนาน", "en": "Parallel"}, {"th": "อนุกรม", "en": "Series"}, {"th": "เท่ากัน", "en": "The same"}, {"th": "ขึ้นกับสายไฟ", "en": "It depends on the wires"}], "hint": {"th": "แบบอนุกรมแต่ละดวงได้แรงดันครึ่งเดียว แบบขนานแต่ละดวงได้แรงดันเต็ม และ P = V²/R", "en": "In series each bulb gets half the voltage; in parallel each gets the full voltage. And P = V²/R."}, "why": {"th": "ขนานได้แรงดันเต็ม กำลังมากกว่าแบบอนุกรม 4 เท่า", "en": "In parallel each gets the full voltage: four times the power of series."}}},
+    "ideal_real": {"ana": {"th": "โหมดอุดมคติเหมือนโจทย์ในหนังสือที่ไม่มีแรงเสียดทาน โหมดจริงคือโลกจริงที่มีความร้อนและความต้านทานแฝง", "en": "Ideal mode is the textbook problem with no friction; real mode is the real world, with heat and hidden resistance."}, "quiz": {"q": {"th": "ลัดวงจรถ่านในโหมดอุดมคติ จะเกิดอะไรขึ้น", "en": "Short a battery in ideal mode. What happens?"}, "opts": [{"th": "กระแสมหาศาล แต่ไม่มีอะไรไหม้", "en": "A huge current, but nothing burns"}, {"th": "ถ่านระเบิด", "en": "The battery explodes"}, {"th": "ไม่มีกระแส", "en": "No current"}, {"th": "ฟิวส์ขาด", "en": "The fuse blows"}], "hint": {"th": "โหมดอุดมคติไม่มีความร้อน ถ้าไม่มีความร้อน อะไรจะทำให้ชิ้นส่วนพัง", "en": "Ideal mode has no heat. Without heat, what could make a part fail?"}, "why": {"th": "โหมดอุดมคติไม่คิดความร้อน จึงไม่มีอะไรไหม้ ต้องเปิดโหมดจริงจึงจะเห็นถ่านระเบิด", "en": "Ideal mode ignores heat, so nothing burns; switch to real mode to see the battery explode."}}}
+  }
+};
+const planTitle = p => p.preset ? presetTitle(p.preset) : tx(p.title);
+const planIdeal = p => p.preset ? !REAL_PRESETS.has(p.preset) : !/ideal=0/.test(p.code);
+// 'circ:id', 'dev:id', 'plan:id' or 'mine:name' -> {code | preset | data, title, cap, ref, key}
 function figure(key){
-  const [k,id]=key.split(':');
+  const i=key.indexOf(':'), k=key.slice(0,i), id=key.slice(i+1);
   if (k==='circ'){ const c=KN.circuits.find(x=>x.id===id); return c ? {code:c.code, title:tx(c.title), ref:id, key} : null; }
+  if (k==='plan'){ const p=PLANS.find(x=>x.id===id); return p ? {code:p.code, preset:p.preset, title:planTitle(p), key, plan:p} : null; }
+  if (k==='mine'){ const s=getSaves().find(x=>x.name===id); return s && validData(s.data) ? {data:s.data, title:s.name, key, save:s} : null; }
   const e=DEV_EX[id]; if (!e) return null;
   if (e.ref) return figure('circ:'+e.ref);
   return {code:e.code, title:tx(e.title), cap:tx(e.cap), key};
@@ -1622,18 +1700,27 @@ function swapIn(st, fn){
     ({comps, wires, topo, t, ideal, energy, events, dirty} = keep);
   }
 }
-function miniState(code){
-  const r=parseCode(code); if (r.errs.length) return null;
-  const st={comps:[], wires:[], topo:null, t:0, ideal:r.data.ideal!==false, energy:{sup:0,heat:0}, events:[], dirty:true};
+const blankState = ideal0 => ({comps:[], wires:[], topo:null, t:0, ideal:ideal0, energy:{sup:0,heat:0}, events:[], dirty:true});
+// a small simulation of its own, from saved data ({comps, wires, ideal}), a CIRCUIT v1 code or a preset
+function dataState(d){
+  const st=blankState(d.ideal!==false);
   swapIn(st, () => {
-    comps = r.data.comps.filter(o=>T[o.type]).map(o => { const p={}; for (const k in T[o.type].def) if (typeof o[k]===typeof T[o.type].def[k]) p[k]=o[k];
-      const c=mk(o.type,o.ax,o.ay,o.bx,o.by,p); if (o.name) c.name=o.name; if (o.off) c.off=true; return c; });
-    for (const a of r.data.wires) addWire(...a.slice(0,4), !!a[4]);
+    comps = d.comps.filter(o=>T[o.type]).map(o => { const p={}; for (const k in T[o.type].def) if (typeof o[k]===typeof T[o.type].def[k]) p[k]=o[k];
+      const c=mk(o.type,o.ax|0,o.ay|0,o.bx|0,o.by|0,p); if (o.num) c.num=o.num|0; if (typeof o.name==='string' && o.name) c.name=o.name.slice(0,12); if (o.off) c.off=true; return c; });
+    for (const a of d.wires.filter(a=>Array.isArray(a) && a.length>=4)) addWire(...a.slice(0,4).map(v=>v|0), !!a[4]);
     numberAll();
   });
   return st;
 }
-// draw a circuit on a small board that fits the canvas. o: {fixH: keep the canvas height, flow, labels, time, maxH}
+function miniState(code){ const r=parseCode(code); return r.errs.length ? null : dataState(r.data); }
+function presetState(name){ const st=blankState(!REAL_PRESETS.has(name)); swapIn(st, () => { comps=[]; wires=[]; PRESETS[name](); numberAll(); }); return st; }
+const stateFrom = f => !f ? null : f.preset ? presetState(f.preset) : f.data ? dataState(f.data) : miniState(f.code);
+
+const partBox = (c, Px, Py, uu, pad) => { const x1=Math.min(Px(c.ax),Px(c.bx))-uu*pad, y1=Math.min(Py(c.ay),Py(c.by))-uu*pad;
+  return [x1, y1, Math.abs(Px(c.bx)-Px(c.ax))+2*uu*pad, Math.abs(Py(c.by)-Py(c.ay))+2*uu*pad]; };
+const rrect = (x, b, r) => { x.beginPath(); x.roundRect ? x.roundRect(b[0],b[1],b[2],b[3],r) : x.rect(b[0],b[1],b[2],b[3]); };
+// draw a circuit on a small board that fits the canvas. o: {fixH: keep the canvas height, flow, labels, time, maxH,
+// mode: 'flow' (paths with current glow, the rest dims) or 'meters' (rings on the meters), spot: a part to light up, still: paused with meters hidden, fx: bursts}
 function drawMini(cv, st, o={}){
   const cs=st.comps, ws=st.wires;
   let x0=N, y0=N, x1=-1, y1=-1; const ext=(gx,gy)=>{ x0=Math.min(x0,gx); y0=Math.min(y0,gy); x1=Math.max(x1,gx); y1=Math.max(y1,gy); };
@@ -1645,50 +1732,108 @@ function drawMini(cv, st, o={}){
   if (!o.fixH) cv.style.height=H+'px';
   const d=Math.min(window.devicePixelRatio||1, 2), uu=Math.min(W/gw, H/gh), ox=(W-uu*gw)/2, oy=(H-uu*gh)/2;
   if (cv.width!==Math.round(W*d) || cv.height!==Math.round(H*d)){ cv.width=Math.round(W*d); cv.height=Math.round(H*d); }
+  st.view={x0, y0, uu, ox, oy};
   const x=cv.getContext('2d'); x.setTransform(d,0,0,d,0,0);
   x.fillStyle=C.bg; x.fillRect(0,0,W,H);
-  const Px=g=>ox+(g-x0+0.5)*uu, Py=g=>oy+(g-y0+0.5)*uu;
+  const Px=g=>ox+(g-x0+0.5)*uu, Py=g=>oy+(g-y0+0.5)*uu, now=performance.now();
+  const fl = o.mode==='flow' && !o.still, live = el => Math.abs(el.i)>1e-6, dotC = elMode?C.el:C.copper;
   if (uu>=6){ x.fillStyle=C.node; x.globalAlpha=0.45; const pr=Math.max(1,uu*0.07);
     for (let gy=y0; gy<=y1; gy++) for (let gx=x0; gx<=x1; gx++){ x.beginPath(); x.arc(Px(gx),Py(gy),pr,0,7); x.fill(); }
     x.globalAlpha=1; }
   x.lineCap='round';
-  for (const w of ws){ if (w.off) continue; const ax=Px(w.ax), ay=Py(w.ay), bx=Px(w.bx), by=Py(w.by);
-    x.strokeStyle='rgba(0,0,0,.55)'; x.lineWidth=Math.max(2,uu*0.2); x.beginPath(); x.moveTo(ax,ay); x.lineTo(bx,by); x.stroke();
-    x.strokeStyle=C.wire; x.lineWidth=Math.max(1.2,uu*0.12); x.beginPath(); x.moveTo(ax,ay); x.lineTo(bx,by); x.stroke(); }
+  for (const w of ws){ if (w.off) continue; const ax=Px(w.ax), ay=Py(w.ay), bx=Px(w.bx), by=Py(w.by), dim=fl && !live(w);
+    const seg=()=>{ x.beginPath(); x.moveTo(ax,ay); x.lineTo(bx,by); x.stroke(); };
+    x.globalAlpha=dim?0.3:1;
+    x.strokeStyle='rgba(0,0,0,.55)'; x.lineWidth=Math.max(2,uu*0.2); seg();
+    x.strokeStyle=C.wire; x.lineWidth=Math.max(1.2,uu*0.12); seg();
+    x.globalAlpha=1;
+    if (fl && !dim){ x.save(); x.globalCompositeOperation='lighter'; x.strokeStyle=dotC; x.globalAlpha=0.17; x.lineWidth=Math.max(3,uu*0.34); x.shadowColor=dotC; x.shadowBlur=glow(uu*0.6); seg(); x.restore(); } }
   for (const c of cs){ const ang=Math.atan2(c.by-c.ay, c.bx-c.ax);
     x.save(); x.translate(Px(c.ax),Py(c.ay)); x.rotate(ang); x.fillStyle=C.bg; x.fillRect(uu*0.3,-uu*0.5,uu*1.4,uu);
-    drawSymbol(x,c,uu,Object.assign({},C,{ink:C.silk}),ang); x.restore(); }
+    drawSymbol(x,c,uu,Object.assign({},C,{ink:C.silk}),ang);
+    if (fl && c.type!=='gnd' && !live(c)){ x.fillStyle='rgba(4,12,9,.62)'; x.fillRect(-uu*0.1,-uu*0.62,uu*2.2,uu*1.24); }
+    x.restore(); }
   const deg=new Map(), bump=k=>deg.set(k,(deg.get(k)||0)+1);
   for (const w of ws){ bump(K(w.ax,w.ay)); bump(K(w.bx,w.by)); }
   for (const c of cs){ bump(K(c.ax,c.ay)); if (c.type!=='gnd') bump(K(c.bx,c.by)); }
   for (const [k,n] of deg){ const gx=k%N, gy=(k-gx)/N; x.fillStyle=C.wire; x.beginPath(); x.arc(Px(gx),Py(gy), (n>=3?0.17:0.12)*uu, 0, 7); x.fill(); }
-  if (o.flow){ for (const w of ws) flowDots(x, w, elMode?C.el:C.copper, Px, Py, uu); for (const c of cs) if (c.type!=='vm' && c.type!=='gnd') flowDots(x, c, elMode?C.el:C.copper, Px, Py, uu); }
-  if (o.labels){ const fs=Math.max(10,Math.round(uu*0.36));
-    for (const c of cs){ if (c.type==='gnd') continue; const mx=(Px(c.ax)+Px(c.bx))/2, my=(Py(c.ay)+Py(c.by))/2, txt=labelText(c);
-      if (c.ay===c.by) labelBox(x, txt, mx, my-uu*0.9, 'c', fs, W, H); else labelBox(x, txt, mx+uu*0.6, my, 'l', fs, W, H); } }
+  if (o.flow && !o.still){ const k=fl?1.3:1; for (const w of ws) flowDots(x, w, dotC, Px, Py, uu, k); for (const c of cs) if (c.type!=='vm' && c.type!=='gnd') flowDots(x, c, dotC, Px, Py, uu, k); }
+  if (o.mode==='meters'){ const a=0.55+0.45*Math.sin(now/240);
+    for (const c of cs) if (c.type==='vm' || c.type==='am'){ x.save(); x.strokeStyle=C.accent; x.globalAlpha=a; x.lineWidth=2; x.shadowColor=C.accent; x.shadowBlur=glow(10); rrect(x, partBox(c,Px,Py,uu,0.62), uu*0.3); x.stroke(); x.restore(); } }
+  for (const f of o.fx||[]){ const k=(now-f.t)/700; if (k<0 || k>1) continue; const c=f.c, mx=(Px(c.ax)+Px(c.bx))/2, my=(Py(c.ay)+Py(c.by))/2;
+    x.save(); x.globalCompositeOperation='lighter'; x.globalAlpha=1-k; x.fillStyle=C.glow; x.beginPath(); x.arc(mx,my,uu*(0.4+1.2*k),0,7); x.fill();
+    x.strokeStyle=C.heat; x.lineWidth=3; x.beginPath(); x.arc(mx,my,uu*(0.6+2.4*k),0,7); x.stroke(); x.restore(); }
+  const fs=Math.max(10,Math.round(uu*0.36));
+  const label = c => { if (c.type==='gnd') return; const mx=(Px(c.ax)+Px(c.bx))/2, my=(Py(c.ay)+Py(c.by))/2, txt = o.still && (c.type==='vm'||c.type==='am') ? lab(c)+' ?' : labelText(c);
+    if (c.ay===c.by) labelBox(x, txt, mx, my-uu*0.9, 'c', fs, W, H); else labelBox(x, txt, mx+uu*0.6, my, 'l', fs, W, H); };
+  if (o.labels) for (const c of cs) label(c);
   if (o.time){ x.font=`500 ${Math.max(10,Math.round(uu*0.34))}px "IBM Plex Mono",monospace`; x.textAlign='left'; x.textBaseline='top'; x.fillStyle=C.muted;
     x.fillText(`t = ${st.t.toFixed(2)} s${st.ideal?'':' · REAL'}`, 24, 12); }
+  if (o.spot && cs.includes(o.spot)){ const b=partBox(o.spot,Px,Py,uu,0.72);
+    x.save(); x.fillStyle='rgba(2,8,6,.6)'; x.beginPath(); x.rect(0,0,W,H); x.roundRect ? x.roundRect(b[0],b[1],b[2],b[3],uu*0.35) : x.rect(b[0],b[1],b[2],b[3]); x.fill('evenodd');
+    x.strokeStyle=C.accent; x.lineWidth=2; x.setLineDash([6,4]); x.lineDashOffset=-now*0.03; x.shadowColor=C.accent; x.shadowBlur=glow(12); rrect(x, b, uu*0.35); x.stroke(); x.restore();
+    if (o.labels) label(o.spot); }
 }
-// the live example board on a detail page
+
+// the live example board on a page: tap a part to light it up (a switch also flips), slow motion, and the lesson modes
 let mini=null;
-function miniStart(code, cv){
-  miniStop(); const st=miniState(code); if (!st || !cv) return;
-  mini={st, cv, code, last:performance.now(), raf:0};
-  drawMini(cv, st, {flow:true, labels:true, time:true, maxH:440});
+function miniStart(f, cv, opt){
+  miniStop(); const st=stateFrom(f); if (!st || !cv) return;
+  mini=Object.assign({st, cv, f, last:performance.now(), raf:0, mode:'', slow:false, still:false, pick:null, spotIx:-1, spotAt:0, capFor:undefined, onTick:null, tk:0, pk:null, fx:[]}, opt||{});
+  miniDraw(miniSpot(performance.now()));
   mini.raf=requestAnimationFrame(miniTick);
 }
 function miniStop(){ if (mini){ cancelAnimationFrame(mini.raf); mini=null; } }
+// on a narrow screen the board stays under ~40% of the screen height, so the step text below it is on the first screen too
+const narrow = matchMedia('(max-width:760px)');
+function miniDraw(spot){ const m=mini; drawMini(m.cv, m.st, {flow:true, labels:true, time:true, maxH:narrow.matches ? Math.max(200, Math.round(innerHeight*0.4)) : 440, mode:m.mode, spot, still:m.still, fx:m.fx}); }
+// the part in the spotlight: one the reader picked, or in the "meet" step each part in turn
+function miniSpot(now){
+  const m=mini, cs=m.st.comps;
+  if (m.pick && now<m.pick.until && cs.includes(m.pick.c)) return m.pick.c;
+  if (m.mode!=='meet' || !cs.length) return null;
+  if (m.spotIx<0 || now-m.spotAt>2600){ m.spotIx=(m.spotIx+1)%cs.length; m.spotAt=now; }
+  return cs[m.spotIx%cs.length];
+}
+// peaks of every reading over the last full period of the slowest AC source (shown for AC circuits)
+function newPeaks(st){ const fs=st.comps.filter(c=>c.type==='ac' && !c.off).map(c=>c.f); return fs.length ? {W:1/Math.min(...fs), t0:st.t, cur:new Map(), prev:new Map()} : null; }
+const reading = c => c.type==='vm' ? c.v : c.i;
+const peakOf = (pk, c) => Math.max(pk.prev.get(c)||0, pk.cur.get(c)||0);
 function miniTick(now){
-  if (!mini) return;
-  if (!mini.cv.isConnected){ miniStop(); return; }
-  const rdt=Math.min(0.05,(now-mini.last)/1000); mini.last=now;
-  const n=Math.min(80, Math.max(1, Math.round(rdt/DT)));
-  swapIn(mini.st, () => { for (let k=0;k<n;k++) step(); wireCurrents(); });
-  const ph = reduce ? 0.35 : 1;
-  for (const el of mini.st.comps){ el.phase+=flowSpeed(el.i)*rdt*ph; if (el.type==='bulb') el.glow=Math.abs(el.v*el.i)/4; if (el.type==='led') el.glow=Math.abs(el.i)/0.02; }
-  for (const el of mini.st.wires) el.phase+=flowSpeed(el.i)*rdt*ph;
-  drawMini(mini.cv, mini.st, {flow:true, labels:true, time:true, maxH:440});
-  mini.raf=requestAnimationFrame(miniTick);
+  const m=mini; if (!m) return;
+  if (!m.cv.isConnected){ miniStop(); return; }
+  const rdt=Math.min(0.05,(now-m.last)/1000); m.last=now;
+  if (!m.still){
+    const n=Math.min(80, Math.max(1, Math.round(rdt*(m.slow?0.2:1)/DT)));
+    swapIn(m.st, () => {
+      for (let k=0;k<n;k++){ step();
+        if (m.pk){ wireCurrents(); const pk=m.pk; for (const c of comps) pk.cur.set(c, Math.max(pk.cur.get(c)||0, Math.abs(reading(c)))); if (t-pk.t0>=pk.W){ pk.prev=pk.cur; pk.cur=new Map(); pk.t0=t; } } }
+      if (!m.pk) wireCurrents();
+      for (const e of events) if (!e.w) m.fx.push({c:e, t:now});
+      events.length=0;
+    });
+    const ph=(reduce?0.35:1)*(m.slow?0.3:1);
+    for (const el of m.st.comps){ el.phase+=flowSpeed(el.i)*rdt*ph; if (el.type==='bulb') el.glow=Math.abs(el.v*el.i)/4; if (el.type==='led') el.glow=Math.abs(el.i)/0.02; }
+    for (const el of m.st.wires) el.phase+=flowSpeed(el.i)*rdt*ph;
+  } else for (const el of m.st.comps) el.glow=0;
+  if (m.fx.length && now-m.fx[0].t>800) m.fx=m.fx.filter(f=>now-f.t<=800);
+  const sp=miniSpot(now);
+  if (sp!==m.capFor){ m.capFor=sp; const el=document.getElementById('lspot');
+    if (el){ el.innerHTML = sp ? `<b>${labH(sp)}</b><span>${esc(tName(sp.type))}</span><small>${esc(role(sp.type))}</small>` : spotHint(); el.classList.toggle('on', !!sp); }
+    docBody.querySelectorAll('.lchip').forEach(b=>b.classList.toggle('on', m.st.comps[+b.dataset.spot]===sp)); }
+  miniDraw(sp);
+  if (m.onTick && (m.tk+=rdt)>=0.15){ m.tk=0; m.onTick(m.st); }
+  m.raf=requestAnimationFrame(miniTick);
+}
+// a tap on the small board: the nearest part goes in the spotlight for a few seconds, and a switch flips
+function miniTap(e){
+  const m=mini, v=m && m.st.view; if (!v) return;
+  const r=m.cv.getBoundingClientRect(), gx=(e.clientX-r.left-v.ox)/v.uu-0.5+v.x0, gy=(e.clientY-r.top-v.oy)/v.uu-0.5+v.y0;
+  let best=null, bd=1;
+  for (const c of m.st.comps){ const dd=Math.hypot((c.ax+c.bx)/2-gx, (c.ay+c.by)/2-gy); if (dd<bd){ bd=dd; best=c; } }
+  if (!best) return;
+  if (best.type==='sw' && !m.still){ best.on=!best.on; m.st.dirty=true; }
+  m.pick={c:best, until:performance.now()+4500};
 }
 function drawSym(cv, type){
   const w=cv.clientWidth||64, h=cv.clientHeight||34, d=Math.min(window.devicePixelRatio||1, 2);
@@ -1699,20 +1844,21 @@ function drawSym(cv, type){
   drawSymbol(x,{type,glow:0,on:true,color:0},uu,Object.assign({},C,{ink:C.silk}),0);
 }
 const MENU_ICON = `DC 0,2 0,0 E=9\nB 4,0 4,2 R=20\nW 0,0 4,0\nW 0,2 4,2`;
+const MENU_ICON3 = `DC 0,2 0,0 E=9\nR 3,0 3,2\nR 5,0 5,2\nW 0,0 5,0\nW 0,2 5,2`;
 function drawMenuIcons(){
   const cv=menuPanel.querySelectorAll('.mitem canvas');
   if (cv[0]) drawSym(cv[0], 'res');
-  const st=cv[1] && miniState(MENU_ICON); if (st) drawMini(cv[1], st, {fixH:true});
+  [[cv[1],MENU_ICON],[cv[2],MENU_ICON3]].forEach(([c,code])=>{ const st=c && miniState(code); if (st) drawMini(c, st, {fixH:true}); });
 }
 
-// navigation: a stack of views {v:'devs'|'dev'|'circs'|'circ'|'con', id}
+// navigation: a stack of views {v:'devs'|'dev'|'circs'|'circ'|'con'|'plans'|'plan'|'mine', id, at: lesson step, tab}
 let docStack=[];
 function openMenu(){ menuPanel.hidden=false; menuBtn.setAttribute('aria-expanded','true'); drawMenuIcons(); }
 function closeMenu(){ menuPanel.hidden=true; menuBtn.setAttribute('aria-expanded','false'); }
 function openDoc(view){ docStack=[view]; docPage.hidden=false; document.body.classList.add('noscroll'); renderDoc(); }
 function docGo(view){ docStack.push(view); renderDoc(); }
 function docBack(){ if (docStack.length>1){ docStack.pop(); renderDoc(); } else { closeDoc(); openMenu(); } }
-function closeDoc(){ miniStop(); docPage.hidden=true; docStack=[]; docBody.innerHTML=''; document.body.classList.remove('noscroll'); }
+function closeDoc(){ miniStop(); les=null; docPage.hidden=true; docStack=[]; docBody.innerHTML=''; document.body.classList.remove('noscroll'); }
 menuBtn.onclick=()=>{ menuPanel.hidden ? openMenu() : closeMenu(); };
 $('#menuClose').onclick=closeMenu;
 menuPanel.addEventListener('click', e=>{
@@ -1723,36 +1869,221 @@ menuPanel.addEventListener('click', e=>{
 $('#docBack').onclick=docBack; $('#docClose').onclick=closeDoc;
 docPage.addEventListener('click', e=>{ if (e.target===docPage) closeDoc(); });
 docBody.addEventListener('click', e=>{
-  const o=e.target.closest('[data-open]'); if (o){ const [v,id]=o.dataset.open.split(':'); docGo({v,id}); return; }
-  const tr=e.target.closest('[data-try]'); if (tr){ tryOnBoard(tr.dataset.try); return; }
-  if (e.target.closest('[data-restart]') && mini) miniStart(mini.code, mini.cv);
+  const t0=e.target, at=s=>t0.closest(s), cur=docStack[docStack.length-1];
+  if (t0.id==='miniCv'){ miniTap(e); return; }
+  let b;
+  if ((b=at('[data-opt]'))){ quizPick(+b.dataset.opt); return; }
+  if ((b=at('[data-lgo]'))){ lessonGo(+b.dataset.lgo, true); return; }
+  if ((b=at('[data-step]'))){ lessonGo(+b.dataset.step, true); return; }
+  if ((b=at('[data-spot]'))){ if (mini){ mini.pick={c:mini.st.comps[+b.dataset.spot], until:performance.now()+5000}; } return; }
+  if ((b=at('[data-open]'))){ const s=b.dataset.open, i=s.indexOf(':'); docGo({v:s.slice(0,i), id:s.slice(i+1)}); return; }
+  if ((b=at('[data-try]'))){ tryOnBoard(b.dataset.try); return; }
+  if ((b=at('[data-tab]'))){ if (cur){ cur.tab=b.dataset.tab; renderDoc(); } return; }
+  if (at('[data-psave]')){ planSave(); return; }
+  if ((b=at('[data-del]'))){ deleteSaved(b.dataset.del); return; }
+  if ((b=at('[data-slow]'))){ if (mini){ mini.slow=!mini.slow; b.setAttribute('aria-pressed',String(mini.slow)); } return; }
+  if (at('[data-restart]') && mini){ mini.st=stateFrom(mini.f); mini.pk=mini.pk && newPeaks(mini.st); mini.fx=[]; mini.capFor=undefined; mini.last=performance.now(); }
 });
+docBody.addEventListener('keydown', e=>{ if (e.key==='Enter' && e.target.id==='pName'){ e.preventDefault(); planSave(); } });
 // put an example on the main board (same confirmation as opening any other circuit over the current one)
 function tryOnBoard(key){
-  const f=figure(key); if (!f) return; const r=parseCode(f.code); if (r.errs.length) return;
-  const go=()=>{ pushUndo(); applyData(r.data); setCircuit(f.title, true); save(); closeDoc(); };
+  const f=figure(key); if (!f) return;
+  let go;
+  if (f.preset) go=()=>{ pushUndo(); loadPreset(f.preset, true); closeDoc(); };
+  else { const d = f.data || (()=>{ const r=parseCode(f.code); return r.errs.length ? null : r.data; })(); if (!d) return;
+    go=()=>{ pushUndo(); applyData(d); setCircuit(f.title, true); save(); closeDoc(); }; }
   if (comps.length||wires.length) askConfirm(L(`เปิด "${f.title}" แทนวงจรบนแผงตอนนี้ใช่ไหม วงจรเดิมจะหายถ้ายังไม่ได้บันทึก`,`Open "${f.title}" in place of the circuit on the board? The current circuit is lost unless you saved it.`), L('เปิดวงจร','Open circuit'), go);
   else go();
 }
+// "ของฉัน" tab: save the circuit on the main board, delete a saved one
+function planSave(){
+  const v=docStack[docStack.length-1], inp=$('#pName'); if (!v || !inp) return;
+  saveAs(inp.value, t2=>{ v.msg=t2; const el=$('#pMsg'); if (el) el.textContent=t2; }, ()=>{ v.name=''; renderDoc(); });
+}
+function deleteSaved(name){
+  askConfirm(L(`ลบวงจรที่บันทึกชื่อ "${name}" ใช่ไหม`,`Delete the saved circuit "${name}"?`), L('ลบ','Delete'), ()=>{
+    putSaves(getSaves().filter(x=>x.name!==name)); if (!$('#savePanel').hidden) renderSaves();
+    while (docStack.length>1 && docStack[docStack.length-1].v==='mine') docStack.pop();
+    const v=docStack[docStack.length-1]; if (v) v.msg=L(`ลบ "${name}" แล้ว`,`Deleted "${name}"`); renderDoc(); });
+}
 // text from knowledge.js shown as HTML: escaped, x^(…) and x^−1 as superscripts, V_R1 as subscripts,
-// and a circuit id written in the text (short_resistor) becomes a link to that circuit, showing its title
+// and a circuit id written in the text (short_resistor) becomes a link to that circuit, showing its title.
+// In English only ids with "_" link: plain words such as "series" or "parallel" stay words
 function rich(v){
   let h=esc(tx(v));
-  const ids=KN.circuits.map(c=>c.id).sort((a,b)=>b.length-a.length);
+  const ids=KN.circuits.map(c=>c.id).filter(id=>lang==='th' || id.includes('_')).sort((a,b)=>b.length-a.length);
   if (ids.length) h=h.replace(new RegExp(`(?<![\\w])(${ids.join('|')})(?![\\w])`,'g'), id=>`\u0001${id}\u0002`);
   h=h.replace(/\^\(([^)]*)\)/g,'<sup>$1</sup>').replace(/\^([−\-+]?[0-9.]+|[A-Za-z]+)/g,'<sup>$1</sup>');
   h=subHTML(h);
   return h.replace(/\u0001([\w]+)\u0002/g, (m,id)=>{ const c=KN.circuits.find(x=>x.id===id); return `<button class="clink" data-open="circ:${id}">${esc(tx(c.title))}</button>`; });
 }
+const fx = v => subHTML(esc(tx(v)));   // the lesson texts written in app.js: escaped, with subscripts
 const ulist = a => `<ul class="pads">${(a||[]).map(v=>`<li>${rich(v)}</li>`).join('')}</ul>`;
-const miniBox = () => `<div class="mini"><span class="mlive">${L('จำลองสด','LIVE')}</span><canvas id="miniCv"></canvas><button class="mre" data-restart>${L('↻ เริ่มใหม่','↻ Restart')}</button></div>`;
-const tryBtn = key => `<button class="primary" data-try="${key}">${L('ลองบนแผง','Try it on the board')}</button>`;
+// the live board: canvas, a "paused" badge for guesses, and a bar under it with the caption of the part in the spotlight and the controls
+const spotHint = () => `<small class="hint">${L('แตะอุปกรณ์บนแผงเพื่อดูชื่อและหน้าที่ แตะสวิตช์เพื่อเปิดหรือปิด','Tap a part on the board to see what it does; tap a switch to flip it')}</small>`;
+const miniBox = () => `<div class="mini"><canvas id="miniCv"></canvas><span class="mfz">${L('หยุดไว้ ทายก่อนดูผล','Paused: guess first')}</span>
+  <div class="mbar"><span class="mlive">${L('จำลองสด','LIVE')}</span><p id="lspot" class="lspot" aria-live="polite">${spotHint()}</p><span class="mctl"><button class="mslow" data-slow aria-pressed="false">${L('ภาพช้า','Slow motion')}</button><button class="mre" data-restart>${L('↻ เริ่มใหม่','↻ Restart')}</button></span></div></div>`;
+const tryBtn = key => `<button class="primary" data-try="${esc(key)}">${L('ลองบนแผง','Try it on the board')}</button>`;
 const sec = (title, body, cls='') => `<section class="dsec ${cls}"><h4><i class="pad" aria-hidden="true"></i>${title}</h4>${body}</section>`;
 const two = n => String(n).padStart(2,'0');
+
+/* lesson player: a circuit explained one idea at a time, next to its live board.
+   Steps: meet the parts (spotlight) → watch the current (paths with current glow) → why → read the meters → guess (board paused) → try it */
+let les=null;   // {steps, at}
+const ROLE = {
+  dc:['ปั๊มประจุ ดันกระแสออกจากขั้วบวก','A charge pump: pushes current out of its + side'],
+  ac:['ปั๊มที่สลับทิศไปมา กระแสจึงไหลกลับไปกลับมา','A pump that keeps reversing, so the current flows back and forth'],
+  res:['ทางแคบ ขวางกระแส ยิ่ง R มาก กระแสยิ่งน้อย','A narrow path that holds the current back: more R, less current'],
+  bulb:['เปลี่ยนพลังงานไฟฟ้าเป็นแสง ยิ่งกำลังมากยิ่งสว่าง','Turns electrical energy into light: more power, more light'],
+  sw:['ประตู เปิดหรือปิดทางเดินของกระแส แตะบนแผงเพื่อสลับ','A gate that opens or closes the path. Tap it on the board'],
+  fuse:['ด่านกันภัย ขาดเองเมื่อกระแสเกินพิกัด','A guard that melts when the current is too high'],
+  cap:['ถังเก็บประจุ เติมจนเต็มแล้วกระแสไฟตรงหยุด','A tank of charge: once full, DC current stops'],
+  ind:['ล้อหนัก ต้านการเปลี่ยนแปลงของกระแส','A heavy flywheel that resists changes in current'],
+  tp:['ขดรับไฟของหม้อแปลง','The input coil of the transformer'],
+  ts:['ขดจ่ายไฟของหม้อแปลง แรงดันเป็น n เท่าของขดรับ','The output coil: n times the input voltage'],
+  diode:['ประตูทางเดียว ให้กระแสไหลตามลูกศรเท่านั้น','A one-way gate: current only goes along the arrow'],
+  led:['ประตูทางเดียวที่เปล่งแสงเมื่อมีกระแส','A one-way gate that lights up when current passes'],
+  vm:['วัดแรงดัน ต่อคร่อม แทบไม่ดึงกระแส','Reads voltage. Connected across, it takes no current'],
+  am:['วัดกระแส ต่ออนุกรม แทบไม่ขวางกระแส','Reads current. Connected in series, it does not block it'],
+  gnd:['จุดอ้างอิง 0 V ของวงจร','The 0 V reference of the circuit'],
+};
+const role = t => ROLE[t] ? L(...ROLE[t]) : '';
+const STEP = { meet:['รู้จักวงจร','Meet the circuit'], flow:['ดูกระแสไหล','Watch the current'], why:['ทำไมเป็นแบบนี้','Why it works'], meters:['อ่านมิเตอร์','Read the meters'],
+  quiz:['ทายก่อน','Guess first'], try:['ลองเอง','Your turn'], ana:['นึกภาพตาม','Picture it'], point:['ประเด็นที่ ','Point '], open:['เปิดใช้','Use it'] };
+const stepTitle = (k, n) => L(STEP[k][0], STEP[k][1]) + (n ? n : '');
+const anaBox = (text, cls='') => `<div class="lana ${cls}"><p class="ltag">${cls==='try'?L('ลองเอง','Your turn'):L('เปรียบเทียบ','Picture it')}</p><p>${text}</p></div>`;
+const flowNote = () => elMode ? L('เส้นที่สว่างคือทางที่มีกระแส จุดที่วิ่งคืออิเล็กตรอน ซึ่งวิ่งสวนทิศกระแส (จากขั้วลบไปขั้วบวก) ส่วนที่มืดไม่มีกระแสเลย','Bright paths carry current. The moving dots are electrons, which run against the current (from − to +). Dark parts carry no current at all.')
+  : L('เส้นที่สว่างคือทางที่มีกระแส จุดวิ่งตามทิศของกระแส จากขั้วบวกผ่านวงจรกลับเข้าขั้วลบ ส่วนที่มืดไม่มีกระแสเลย กด "ภาพช้า" เพื่อดูชัดขึ้น','Bright paths carry current and the dots move with it, from + around the circuit back to −. Dark parts carry no current at all. Press "Slow motion" for a closer look.');
+// live text inside the step card, refreshed a few times a second from the small board
+function liveSources(st){ const el=docBody.querySelector('[data-src]'); if (!el) return;
+  const ss=st.comps.filter(c=>c.type==='dc'||c.type==='ac');
+  el.innerHTML = ss.length ? `${L('กระแสจากแหล่งจ่ายตอนนี้','Current from the source now')}: ${ss.map(c=>`<b>${labH(c)}</b> ${esc(fmt(Math.abs(c.i),'A'))}`).join(' · ')}` : ''; }
+function liveReads(st){
+  docBody.querySelectorAll('[data-mi]').forEach(el=>{ const c=st.comps[+el.dataset.mi]; if (!c) return;
+    el.textContent = c.broken ? L('ไหม้','burnt') : fmt(reading(c), c.type==='vm'?'V':'A'); });
+  docBody.querySelectorAll('[data-pk]').forEach(el=>{ const c=st.comps[+el.dataset.pk]; if (c && mini && mini.pk) el.textContent=L('สูงสุด ','peak ')+fmt(peakOf(mini.pk,c), c.type==='vm'?'V':'A'); });
+  docBody.querySelectorAll('[data-meter]').forEach(el=>{ const c=st.comps.find(x=>x.name===el.dataset.meter); if (!c){ el.hidden=true; return; }
+    el.textContent = L('ตอนนี้ ','now ')+fmt(reading(c), c.type==='vm'?'V':'A')+(mini && mini.pk ? L(' · สูงสุด ',' · peak ')+fmt(peakOf(mini.pk,c), c.type==='vm'?'V':'A') : ''); });
+}
+const chips = st => `<div class="lchips">${st.comps.map((c,i)=>`<button class="lchip" data-spot="${i}" style="--c:${tagCol(c)}"><i aria-hidden="true"></i><b>${labH(c)}</b><span>${esc(tName(c.type))}</span></button>`).join('')}</div>`;
+const meetNote = st => L(`วงจรนี้มีอุปกรณ์ ${st.comps.length} ชิ้น แผงด้านบนส่องไฟทีละชิ้น แตะชื่อหรือแตะบนแผงเพื่อดูว่าอยู่ตรงไหนและทำหน้าที่อะไร`,
+  `This circuit has ${st.comps.length} parts. The board lights them up one by one; tap a name, or a part on the board, to see where it is and what it does.`);
+const stepMeet = intro => ({k:'meet', mode:'meet', body:st=>`${intro?`<p class="lp big">${intro}</p>`:''}<p class="lp dim">${meetNote(st)}</p>${chips(st)}`});
+const stepFlow = top => ({k:'flow', mode:'flow', body:()=>`${top}<p class="lp dim">${flowNote()}</p><p class="llive" data-src></p>`, tick:liveSources});
+// readings of the meters on the board (or of every part when there are none), live, with the peak for AC circuits
+function stepMeters(){
+  return {k:'meters', mode:'meters', peaks:true, tick:liveReads, body:st=>{
+    const ms=st.comps.filter(c=>c.type==='vm'||c.type==='am'), list=ms.length ? ms : st.comps.filter(c=>c.type!=='gnd' && c.type!=='vm'), ac=st.comps.some(c=>c.type==='ac');
+    return `<p class="lp dim">${ms.length ? L('ตัวเลขด้านล่างอ่านสดจากมิเตอร์บนแผงเล็ก ลองคำนวณเองก่อน แล้วค่อยเทียบ','The numbers below are read live from the meters on the small board. Work them out yourself first, then compare.')
+      : L('วงจรนี้ไม่มีมิเตอร์ ตัวเลขด้านล่างคือกระแสในอุปกรณ์แต่ละชิ้น เหมือนการ์ดใต้แผงหลัก','This circuit has no meters. Below is the current in each part, as on the cards under the main board.')}</p>
+      ${ac?`<p class="lp dim">${L('ไฟสลับเปลี่ยนค่าตลอดเวลา จึงแสดงค่าสูงสุดในหนึ่งคาบไว้ด้วย','AC keeps changing, so the peak over one cycle is shown too.')}</p>`:''}
+      <div class="lread">${list.map(c=>{ const i=st.comps.indexOf(c); return `<div class="lrow"><code>${labH(c)}</code><span>${esc(tName(c.type))}</span><b data-mi="${i}">–</b>${ac?`<em data-pk="${i}"></em>`:''}</div>`; }).join('')}</div>`; }};
+}
+// a guess: the board pauses with its meters hidden until it is answered. Options are shuffled the same way every time
+function shuffled(n, seed){ let h=7; for (const ch of seed) h=(h*31+ch.charCodeAt(0))|0; const a=[...Array(n).keys()];
+  for (let i=n-1;i>0;i--){ h=(Math.imul(h,1103515245)+12345)|0; const j=((h>>>8)%(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+const stepQuiz = (q, seed) => q ? {k:'quiz', mode:'', quiz:q, ord:shuffled(q.opts.length, seed), qs:{tries:[], done:false, ok:false}, body:()=>''} : null;
+function quizBody(s){
+  const q=s.quiz, z=s.qs, n=z.tries.length;
+  const opts=s.ord.map((i,k)=>{ const cls = z.tries.includes(i) ? (i===0?'yes':'no') : (z.done && i===0 ? 'yes reveal' : '');
+    return `<button class="lopt ${cls}" data-opt="${i}"${z.done||z.tries.includes(i)?' disabled':''}><i aria-hidden="true">${'ABCD'[k]}</i><span>${fx(q.opts[i])}</span>${cls==='yes'?`<span class="burst" aria-hidden="true">${Array.from({length:12},(_,j)=>`<i style="--a:${j*30}deg"></i>`).join('')}</span>`:''}</button>`; }).join('');
+  let fb='';
+  if (z.done && z.ok) fb=`<div class="lfb ok"><b>${n===1?L('ถูกตั้งแต่ครั้งแรก','Right first time'):L('ถูกแล้ว','Right')}</b> ${n===1?L('คิดจากหลักได้ตรงจุด','You reasoned straight from the rule.'):L('ใช้คำใบ้ไล่เหตุผลจนเจอคำตอบ','You followed the hint through to the answer.')} ${fx(q.why)}</div>`;
+  else if (z.done) fb=`<div class="lfb show"><b>${L('เฉลย','The answer')}</b> ${fx(q.why)} ${L('ไม่เป็นไร ลองดูค่าบนแผงประกอบกับเหตุผลนี้','That is fine: check the board against this reason.')}</div>`;
+  else if (n) fb=`<div class="lfb hint"><b>${L('ยังไม่ใช่ ลองคิดแบบนี้','Not yet. Think about this')}</b> ${fx(q.hint)}</div>`;
+  return `<p class="lp dim">${z.done ? L('แผงด้านบนเล่นต่อแล้ว ดูค่าจริงจากมิเตอร์ได้เลย','The board above is running again: check the real values.') : L('ทายก่อนดูผล แผงด้านบนหยุดไว้และซ่อนค่ามิเตอร์ ตอบแล้วจะเล่นต่อให้ดูว่าจริงไหม','Guess before you look: the board above is paused with its meters hidden. Answer and it plays on so you can check.')}</p>
+    <p class="lqq">${fx(q.q)}</p><div class="lqo">${opts}</div>${fb}`;
+}
+function quizPick(i){
+  const s=les && les.steps[les.at]; if (!s || !s.quiz || s.qs.done || s.qs.tries.includes(i)) return;
+  s.qs.tries.push(i);
+  if (i===0 || s.qs.tries.length>=2){ s.qs.done=true; s.qs.ok=i===0; }
+  const box=$('#lbody'); if (box) box.innerHTML=quizBody(s);
+  if (s.qs.done) stillBoard(false);
+}
+function stillBoard(on){ if (!mini) return; mini.still=on; const box=mini.cv.parentElement; if (box) box.classList.toggle('still', on); }
+const stepTry = (text, acts) => ({k:'try', mode:'', body:()=>`${anaBox(text,'try')}<p class="lp dim">${L('กด "ลองบนแผง" เพื่อเปิดวงจรนี้บนแผงหลัก แล้วปรับค่า สลับสวิตช์ หรือต่อเพิ่มได้เต็มที่','Press "Try it on the board" to open this circuit on the main board, where you can change values, flip switches and add parts.')}</p><div class="dacts">${acts}</div>`});
+function lessonHTML(steps, all, foot){
+  return `<div class="lesson"><ol class="lsteps">${steps.map((s,i)=>`<li><button data-step="${i}" title="${esc(s.title)}"><i>${two(i+1)}</i><span>${esc(s.title)}</span></button></li>`).join('')}</ol>
+    <div class="lprog" aria-hidden="true"><i></i></div>
+    <div class="lgrid"><div class="lboard">${miniBox()}</div><div id="lcard" class="lcard"></div></div>
+    ${foot?`<div class="dacts lfoot">${foot}</div>`:''}
+    ${all?`<details class="lall"><summary>${L('สรุปทั้งหมดในหน้าเดียว','Everything on one page')}</summary>${all}</details>`:''}</div>`;
+}
+// start a lesson: the board, then the step the view was on
+function lessonStart(f, steps, at){
+  les={steps:steps.filter(Boolean), at:0};
+  miniStart(f, $('#miniCv'));
+  lessonGo(at||0);
+}
+function lessonGo(i, user){
+  if (!les) return; const n=les.steps.length; i=Math.max(0, Math.min(n-1, i|0)); les.at=i;
+  const v=docStack[docStack.length-1]; if (v) v.at=i;
+  const s=les.steps[i];
+  docBody.querySelectorAll('.lsteps button').forEach((b,k)=>{ b.classList.toggle('on',k===i); b.classList.toggle('done',k<i); if (k===i) b.setAttribute('aria-current','step'); else b.removeAttribute('aria-current'); });
+  const pr=docBody.querySelector('.lprog i'); if (pr) pr.style.width=((i+1)/n*100)+'%';
+  const card=$('#lcard'); if (!card) return;
+  const st=mini ? mini.st : blankState(true);
+  card.innerHTML=`<div class="lin"><p class="lnum">${L(`ขั้นที่ ${i+1} จาก ${n}`,`Step ${i+1} of ${n}`)}</p><h3>${esc(s.title)}</h3><div id="lbody">${s.quiz?quizBody(s):s.body(st)}</div></div>
+    <div class="lnav"><button data-lgo="${i-1}"${i?'':' disabled'}>${L('← ก่อนหน้า','← Back')}</button>${i<n-1?`<button class="primary" data-lgo="${i+1}">${L('ถัดไป','Next')} · ${esc(les.steps[i+1].title)} →</button>`:`<button data-lgo="0">${L('↺ เริ่มบทเรียนใหม่','↺ Start over')}</button>`}</div>`;
+  if (mini){ mini.mode=s.mode||''; mini.pick=null; mini.spotIx=-1; mini.capFor=undefined; mini.onTick=s.tick||null; mini.tk=1; mini.pk=s.peaks ? newPeaks(mini.st) : null; stillBoard(!!(s.quiz && !s.qs.done)); }
+  if (user){ const box=docPage.querySelector('.docbox'), top=docBody.querySelector('.lesson'); if (box && top && top.getBoundingClientRect().top<0) box.scrollTo({top:top.offsetTop-70, behavior:reduce?'auto':'smooth'}); }
+}
+// lessons for a circuit of knowledge.js, an idea, a plan and a saved circuit
+function circLesson(c){
+  const X=LESSON.circ[c.id]||{}, key='circ:'+c.id;
+  const src={meter:L('มิเตอร์','meter'), card:L('การ์ดอุปกรณ์','device card'), calculated:L('คำนวณเอง','work it out')};
+  const when=r=>Array.isArray(r.t_s) ? `t = ${r.t_s[0]}–${r.t_s[1]} s` : (typeof r.t_s==='number' ? `t = ${r.t_s} s` : '');
+  const reads=`<div class="rlist">${(c.readings||[]).map(r=>`<div class="rrow"><code>${subHTML(esc(r.meter))}</code><b>${esc(typeof r.value==='number' ? fmt(r.value, r.unit||'') : r.value)}</b>${when(r)?`<em>${when(r)}</em>`:''}<em>${src[r.source]||esc(r.source||'')}</em><span class="lnow" data-meter="${esc(r.meter)}"></span>${r.note?`<small>${rich(r.note)}</small>`:''}</div>`).join('')}</div>`;
+  const steps=[
+    Object.assign(stepMeet(`${esc(tx(c.topic))} · ${/ideal=0/.test(c.code)?L('โหมดจริง','real mode'):L('โหมดอุดมคติ','ideal mode')}`), {title:stepTitle('meet')}),
+    X.ana ? Object.assign(stepFlow(anaBox(fx(X.ana))), {title:stepTitle('flow')}) : Object.assign(stepFlow(''), {title:stepTitle('flow')}),
+    {k:'why', title:stepTitle('why'), mode:'flow', body:()=>`<p class="lp big">${rich(c.why)}</p>`},
+    {k:'meters', title:stepTitle('meters'), mode:'meters', peaks:true, tick:liveReads, body:()=>`<p class="lp dim">${L('ค่าที่ควรอ่านได้ เทียบกับค่าที่แผงด้านบนอ่านได้ตอนนี้','What you should read, next to what the board above reads right now.')}</p>${reads}`},
+    X.quiz && Object.assign(stepQuiz(X.quiz, key), {title:stepTitle('quiz')}),
+    Object.assign(stepTry(rich(c.try_it), tryBtn(key)), {title:stepTitle('try')}),
+  ];
+  const all=`${sec(L('ทำไมจึงเป็นแบบนี้','Why it works this way'), `<p>${rich(c.why)}</p>`)}${sec(L('ค่าที่ควรอ่านได้','What you should read'), reads.replace(/<span class="lnow"[^>]*><\/span>/g,''))}<section class="dsec guess"><p class="gtag">${L('ลองทายก่อน','Guess first')}</p><p>${rich(c.try_it)}</p></section>`;
+  return {steps, all};
+}
+function conLesson(c, f){
+  const X=LESSON.con[c.id]||{}, pts=c.points||[];
+  const steps=[
+    Object.assign(stepFlow(`${X.ana?anaBox(fx(X.ana)):''}<p class="lp big">${rich(c.text)}</p>`), {k:'ana', title:stepTitle('ana')}),
+    ...pts.map((p,i)=>({k:'point', title:stepTitle('point', i+1), mode:'flow', body:()=>`<p class="lp big">${rich(p)}</p>`})),
+    X.quiz && Object.assign(stepQuiz(X.quiz, 'con:'+c.id), {title:stepTitle('quiz')}),
+    f && Object.assign(stepTry(L(`วงจรด้านบนคือ "${esc(f.title)}" เปิดบนแผงหลักแล้วลองเปลี่ยนค่าดูว่าแนวคิดนี้ยังจริงไหม`,`The circuit above is "${esc(f.title)}". Open it on the main board and change things to see whether the idea still holds.`),
+      tryBtn(f.key)+(f.ref?`<button data-open="circ:${f.ref}">${L('บทเรียนของวงจรนี้','Lesson for this circuit')}</button>`:'')), {title:stepTitle('try')}),
+  ];
+  return {steps, all:`<section class="dsec lead"><p>${rich(c.text)}</p>${ulist(pts)}</section>`};
+}
+function planLesson(p){
+  const key='plan:'+p.id;
+  const steps=[
+    Object.assign(stepMeet(fx(p.desc)), {title:stepTitle('meet')}),
+    Object.assign(stepFlow(`<p class="lp big">${fx(p.idea)}</p>`), {title:stepTitle('flow')}),
+    Object.assign(stepMeters(), {title:stepTitle('meters')}),
+    p.quiz && Object.assign(stepQuiz(p.quiz, key), {title:stepTitle('quiz')}),
+    Object.assign(stepTry(fx(p.try), tryBtn(key)), {title:stepTitle('try')}),
+  ];
+  return {steps, all:`<section class="dsec lead"><p>${fx(p.desc)}</p><p>${fx(p.idea)}</p></section><section class="dsec guess"><p class="gtag">${L('ลองทายก่อน','Guess first')}</p><p>${fx(p.try)}</p></section>`};
+}
+function mineLesson(f){
+  const s=f.save, key=f.key, when=new Date(s.time).toLocaleString(L('th-TH','en-GB'),{dateStyle:'medium',timeStyle:'short'});
+  const steps=[
+    Object.assign(stepMeet(L(`บันทึกไว้เมื่อ ${esc(when)} · สายไฟ ${s.data.wires.length} เส้น · ${s.data.ideal===false?'โหมดจริง':'โหมดอุดมคติ'}`,`Saved ${esc(when)} · ${s.data.wires.length} wire segments · ${s.data.ideal===false?'real mode':'ideal mode'}`)), {title:stepTitle('meet')}),
+    Object.assign(stepFlow(''), {title:stepTitle('flow')}),
+    Object.assign(stepMeters(), {title:stepTitle('meters')}),
+    {k:'open', title:stepTitle('open'), mode:'', body:()=>`<p class="lp">${L('เปิดวงจรนี้บนแผงหลักเพื่อแก้ต่อ หรือลบออกจากรายการ','Open this circuit on the main board to keep working on it, or delete it from the list.')}</p><div class="dacts"><button class="primary" data-try="${esc(key)}">${L('เปิดบนแผง','Open on the board')}</button><button class="danger" data-del="${esc(s.name)}">${L('ลบวงจรนี้','Delete this circuit')}</button></div>`},
+  ];
+  return {steps};
+}
+
 function renderDoc(){
-  miniStop();
+  miniStop(); les=null;
   const v=docStack[docStack.length-1]; if (!v){ closeDoc(); return; }
   const title=$('#docTitle'), kick=$('#docKick');
+  let lesson=null, f=null;
   if (v.v==='devs'){
     kick.textContent=L(`อุปกรณ์ · ${KN.devices.length} ชิ้น`,`Components · ${KN.devices.length}`);
     title.textContent=L('อุปกรณ์วงจร','Circuit components');
@@ -1762,7 +2093,7 @@ function renderDoc(){
       + groups.map(G=>`<h3 class="dgrp"><span>${esc(G.g)}</span></h3><div class="dlist">${G.items.map(d=>`<button class="ditem" data-open="dev:${d.id}" style="--k:${n++}"><span class="dtile"><canvas data-sym="${d.id}" aria-hidden="true"></canvas></span><span class="dtx"><b>${esc(tx(d.name))}</b><small>${rich(d.what)}</small></span><i class="code">${esc(d.code)}</i></button>`).join('')}</div>`).join('');
   } else if (v.v==='dev'){
     const k=KN.devices.findIndex(x=>x.id===v.id), d=KN.devices[k]; if (!d){ docBack(); return; }
-    const f=figure('dev:'+d.id);
+    f=figure('dev:'+d.id);
     kick.textContent=L(`อุปกรณ์ ${two(k+1)} / ${KN.devices.length}`,`Component ${two(k+1)} / ${KN.devices.length}`);
     title.textContent=tx(d.name);
     docBody.innerHTML=`<div class="dhero"><span class="dtile big"><canvas class="dbig" data-sym="${d.id}" aria-hidden="true"></canvas></span><div><p class="dkick">${esc(tx(d.group))} <span class="code">${esc(d.code)}</span></p><h3 class="dname">${esc(tx(d.name))}</h3><p class="dwhat">${rich(d.what)}</p></div></div>
@@ -1772,41 +2103,62 @@ function renderDoc(){
       <div class="dmodes"><div class="mode ideal"><p class="mtag">${L('โหมดอุดมคติ','Ideal mode')}</p><p>${rich(d.ideal_mode)}</p></div><div class="mode real"><p class="mtag">${L('โหมดจริง','Real mode')}</p><p>${rich(d.real_mode)}</p></div></div>
       ${sec(L('ข้อควรระวัง','Watch out'), ulist(d.watch_out), 'warn')}
       <section class="dsec guess"><p class="gtag">${L('ลองทายก่อน','Guess first')}</p><p>${rich(d.try_it)}</p></section>
-      ${f ? sec(`${L('วงจรพื้นฐาน','Basic circuit')} · ${esc(f.title)}`, `${f.cap?`<p class="dcap">${subHTML(esc(f.cap))}</p>`:''}${miniBox()}<div class="dacts">${tryBtn(f.key)}${f.ref?`<button data-open="circ:${f.ref}">${L('อ่านคำอธิบายวงจรนี้','Read about this circuit')}</button>`:''}</div>`, 'board') : ''}`;
-    if (f) miniStart(f.code, $('#miniCv'));
+      ${f ? sec(`${L('วงจรพื้นฐาน','Basic circuit')} · ${esc(f.title)}`, `${f.cap?`<p class="dcap">${subHTML(esc(f.cap))}</p>`:''}${miniBox()}<div class="dacts">${tryBtn(f.key)}${f.ref?`<button data-open="circ:${f.ref}">${L('บทเรียนของวงจรนี้','Lesson for this circuit')}</button>`:''}</div>`, 'board') : ''}`;
+    if (f) miniStart(f, $('#miniCv'));
   } else if (v.v==='circs'){
     kick.textContent=L(`แนวคิด ${KN.concepts.length} · วงจร ${KN.circuits.length}`,`${KN.concepts.length} ideas · ${KN.circuits.length} circuits`);
     title.textContent=L('อธิบายวงจร','Circuit explanations');
     let n=0;
     const card=(open, fig, name, sub, text)=>`<button class="citem" data-open="${open}" style="--k:${n++}"><span class="ctile"><canvas data-fig="${fig}" aria-hidden="true"></canvas></span><span class="dtx"><b>${esc(name)}</b>${sub?`<i>${esc(sub)}</i>`:''}<small>${rich(text)}</small></span></button>`;
-    docBody.innerHTML=`<h3 class="dgrp"><span>${L('แนวคิดพื้นฐาน','Basic ideas')}</span></h3><div class="clist2">${KN.concepts.map(c=>card('con:'+c.id, CON_FIG[c.id]||'', tx(c.title), '', c.text)).join('')}</div>
-      <h3 class="dgrp"><span>${L('วงจรตัวอย่าง','Example circuits')}</span></h3><div class="clist2">${KN.circuits.map(c=>card('circ:'+c.id, 'circ:'+c.id, tx(c.title), tx(c.topic), c.why)).join('')}</div>`;
-    // a link inside a card summary must not hijack the card
-    docBody.querySelectorAll('.citem .clink, .ditem .clink').forEach(b=>b.replaceWith(document.createTextNode(b.textContent)));
+    docBody.innerHTML=`<p class="dlead">${L('ทุกหัวข้อเป็นบทเรียนทีละขั้น มีวงจรจำลองสด ดูกระแสไหล อ่านมิเตอร์ และทายก่อนดูผล','Every topic is a step-by-step lesson with a live circuit: watch the current, read the meters, and guess before you look.')}</p>
+      <h3 class="dgrp"><span>${L('แนวคิดพื้นฐาน','Basic ideas')}</span></h3><div class="clist2">${KN.concepts.map(c=>card('con:'+c.id, CON_FIG[c.id]||'', tx(c.title), '', c.text)).join('')}</div>
+      <h3 class="dgrp"><span>${L('วงจรตัวอย่าง','Example circuits')}</span></h3><div class="clist2">${KN.circuits.map(c=>card('circ:'+c.id, 'circ:'+c.id, tx(c.title), tx(c.topic), c.why)).join('')}</div>
+      <div class="dacts"><button data-open="plans:">${L(`ดูแปลนวงจรเพิ่มอีก ${PLANS.length} แบบ →`,`See ${PLANS.length} more circuit plans →`)}</button></div>`;
   } else if (v.v==='circ'){
     const k=KN.circuits.findIndex(x=>x.id===v.id), c=KN.circuits[k]; if (!c){ docBack(); return; }
-    kick.textContent=L(`วงจร ${two(k+1)} / ${KN.circuits.length}`,`Circuit ${two(k+1)} / ${KN.circuits.length}`);
+    kick.textContent=L(`บทเรียนวงจร ${two(k+1)} / ${KN.circuits.length}`,`Circuit lesson ${two(k+1)} / ${KN.circuits.length}`);
     title.textContent=tx(c.title);
-    const src={meter:L('มิเตอร์','meter'), card:L('การ์ดอุปกรณ์','device card'), calculated:L('คำนวณเอง','work it out')};
-    const when=r=>Array.isArray(r.t_s) ? `t = ${r.t_s[0]}–${r.t_s[1]} s` : (typeof r.t_s==='number' ? `t = ${r.t_s} s` : '');
-    docBody.innerHTML=`${miniBox()}<div class="dbar"><p class="dkick">${esc(tx(c.topic))} · ${/ideal=0/.test(c.code)?L('โหมดจริง','real mode'):L('โหมดอุดมคติ','ideal mode')}</p>${tryBtn('circ:'+c.id)}</div>
-      ${sec(L('ทำไมจึงเป็นแบบนี้','Why it works this way'), `<p>${rich(c.why)}</p>`)}
-      ${sec(L('ค่าที่ควรอ่านได้','What you should read'), `<div class="rlist">${(c.readings||[]).map(r=>`<div class="rrow"><code>${subHTML(esc(r.meter))}</code><b>${esc(typeof r.value==='number' ? fmt(r.value, r.unit||'') : r.value)}</b>${when(r)?`<em>${when(r)}</em>`:''}<em>${src[r.source]||esc(r.source||'')}</em>${r.note?`<small>${rich(r.note)}</small>`:''}</div>`).join('')}</div>`)}
-      <section class="dsec guess"><p class="gtag">${L('ลองทายก่อน','Guess first')}</p><p>${rich(c.try_it)}</p></section>`;
-    miniStart(c.code, $('#miniCv'));
+    f=figure('circ:'+c.id); lesson=circLesson(c);
   } else if (v.v==='con'){
     const k=KN.concepts.findIndex(x=>x.id===v.id), c=KN.concepts[k]; if (!c){ docBack(); return; }
-    const f=CON_FIG[c.id] && figure(CON_FIG[c.id]);
-    kick.textContent=L(`แนวคิด ${two(k+1)} / ${KN.concepts.length}`,`Idea ${two(k+1)} / ${KN.concepts.length}`);
+    f=CON_FIG[c.id] && figure(CON_FIG[c.id]);
+    kick.textContent=L(`บทเรียนแนวคิด ${two(k+1)} / ${KN.concepts.length}`,`Idea lesson ${two(k+1)} / ${KN.concepts.length}`);
     title.textContent=tx(c.title);
-    docBody.innerHTML=`${f?`${miniBox()}<div class="dbar"><p class="dcap">${L('วงจรประกอบ','Circuit shown')}: ${esc(f.title)}</p>${tryBtn(f.key)}</div>`:''}
-      <section class="dsec lead"><p>${rich(c.text)}</p>${ulist(c.points)}</section>
-      ${f && f.ref ? `<div class="dacts"><button data-open="circ:${f.ref}">${L('อ่านคำอธิบายวงจรนี้','Read about this circuit')}</button></div>` : ''}`;
-    if (f) miniStart(f.code, $('#miniCv'));
+    if (f) lesson=conLesson(c, f);
+    else docBody.innerHTML=`<section class="dsec lead"><p>${rich(c.text)}</p>${ulist(c.points)}</section>`;
+  } else if (v.v==='plans'){
+    const tab=v.tab==='mine'?'mine':'sys', saves=getSaves();
+    kick.textContent=L(`ของระบบ ${PLANS.length} · ของฉัน ${saves.length}`,`${PLANS.length} ready-made · ${saves.length} saved`);
+    title.textContent=L('แปลนวงจร','Circuit plans');
+    let n=0;
+    const tabs=`<div class="ptabs" role="tablist" aria-label="${L('แปลนวงจร','Circuit plans')}"><button role="tab" data-tab="sys" aria-selected="${tab==='sys'}">${L('ของระบบ','Ready-made')} <b>${PLANS.length}</b></button><button role="tab" data-tab="mine" aria-selected="${tab==='mine'}">${L('ของฉัน','Mine')} <b>${saves.length}</b></button></div>`;
+    if (tab==='sys'){
+      docBody.innerHTML=`${tabs}<p class="dlead">${L('วงจรสำเร็จรูปที่ระบบเตรียมไว้ แตะเพื่อเรียนทีละขั้น: ดูกระแสไหล อ่านมิเตอร์ ทายก่อนดูผล แล้วเปิดบนแผงหลัก','Ready-made circuits. Tap one for a step-by-step lesson: watch the current, read the meters, guess first, then open it on the main board.')}</p>`
+        + PLAN_CAT.map(G=>{ const ps=PLANS.filter(p=>p.cat===G.id); return ps.length ? `<h3 class="dgrp"><span>${esc(tx(G.title))}</span><em>${ps.length}</em></h3><div class="clist2">${ps.map(p=>`<button class="citem" data-open="plan:${p.id}" style="--k:${n++}"><span class="ctile"><canvas data-fig="plan:${p.id}" aria-hidden="true"></canvas></span><span class="dtx"><b>${esc(planTitle(p))}</b><i class="${planIdeal(p)?'':'real'}">${planIdeal(p)?L('โหมดอุดมคติ','ideal mode'):L('โหมดจริง','real mode')}${p.quiz?L(' · มีคำถามให้ทาย',' · with a quiz'):''}</i><small>${fx(p.desc)}</small></span></button>`).join('')}</div>` : ''; }).join('');
+    } else {
+      docBody.innerHTML=`${tabs}<p class="dlead">${L('วงจรที่คุณบันทึกไว้ในเบราว์เซอร์นี้ (ที่เดียวกับปุ่ม "บันทึก / เปิดวงจร") แตะเพื่อดูกระแสไหลและค่ามิเตอร์','Circuits you saved in this browser (the same list as the "Save / open" button). Tap one to watch its current and meters.')}</p>
+        <div class="psave"><input id="pName" maxlength="40" value="${esc(v.name ?? circuitName)}" aria-label="${L('ชื่อวงจร','Circuit name')}" placeholder="${L('ชื่อวงจร','Circuit name')}"><button class="primary" data-psave>${L('บันทึกวงจรบนแผงตอนนี้','Save the circuit on the board')}</button></div>
+        <p id="pMsg" class="pmsg" role="status">${esc(v.msg||'')}</p>
+        ${saves.length ? `<div class="clist2">${saves.map(s=>`<button class="citem" data-open="mine:${esc(s.name)}" style="--k:${n++}"><span class="ctile"><canvas data-fig="mine:${esc(s.name)}" aria-hidden="true"></canvas></span><span class="dtx"><b>${esc(s.name)}</b><i class="${s.data.ideal===false?'real':''}">${s.data.ideal===false?L('โหมดจริง','real mode'):L('โหมดอุดมคติ','ideal mode')}</i><small>${esc(L(`อุปกรณ์ ${s.data.comps.length} ชิ้น · สายไฟ ${s.data.wires.length} เส้น · `,`${s.data.comps.length} parts · ${s.data.wires.length} wire segments · `)+new Date(s.time).toLocaleString(L('th-TH','en-GB'),{dateStyle:'medium',timeStyle:'short'}))}</small></span></button>`).join('')}</div>`
+          : `<div class="pempty"><p>${L('ยังไม่มีวงจรที่บันทึกไว้ ตั้งชื่อแล้วกดบันทึกด้านบน วงจรบนแผงหลักตอนนี้จะมาอยู่ที่นี่','No saved circuits yet. Give the circuit on the main board a name and save it above; it will appear here.')}</p></div>`}`;
+    }
+    v.msg='';
+  } else if (v.v==='plan'){
+    const k=PLANS.findIndex(x=>x.id===v.id), p=PLANS[k]; if (!p){ docBack(); return; }
+    const G=PLAN_CAT.find(x=>x.id===p.cat);
+    kick.textContent=`${G?tx(G.title)+' · ':''}${L('แปลน','Plan')} ${two(k+1)} / ${PLANS.length}`;
+    title.textContent=planTitle(p);
+    f=figure('plan:'+p.id); lesson=planLesson(p);
+  } else if (v.v==='mine'){
+    f=figure('mine:'+v.id); if (!f){ docBack(); return; }
+    kick.textContent=L('แปลนของฉัน','My plan');
+    title.textContent=f.title;
+    lesson=mineLesson(f);
   }
+  if (lesson){ docBody.innerHTML=lessonHTML(lesson.steps.filter(Boolean), lesson.all, f.save ? '' : tryBtn(f.key)); lessonStart(f, lesson.steps, v.at); }
   docPage.querySelector('.docbox').scrollTop=0;
   docBody.querySelectorAll('canvas[data-sym]').forEach(cv=>drawSym(cv, cv.dataset.sym));
-  docBody.querySelectorAll('canvas[data-fig]').forEach(cv=>{ const f=cv.dataset.fig && figure(cv.dataset.fig), st=f && miniState(f.code); if (st) drawMini(cv, st, {fixH:true}); });
+  docBody.querySelectorAll('canvas[data-fig]').forEach(cv=>{ const f2=cv.dataset.fig && figure(cv.dataset.fig), st=stateFrom(f2); if (st) drawMini(cv, st, {fixH:true}); });
 }
 
 // language: switch every text on the page. Static texts carry their English in data-en (inner HTML) and data-en-title / -aria-label /
@@ -1816,6 +2168,7 @@ function namePairs(){
   document.querySelectorAll('#preset option[data-en]').forEach(o=>{ if (o.value) p.push([o.dataset.th ?? o.textContent, o.dataset.en]); });
   for (const c of KN.circuits) if (c.title) p.push([c.title.th, c.title.en]);
   for (const k in DEV_EX) if (DEV_EX[k].title) p.push([DEV_EX[k].title.th, DEV_EX[k].title.en]);
+  for (const q of PLANS) if (q.title) p.push([q.title.th, q.title.en]);
   return p;
 }
 function setLang(v){
@@ -1925,10 +2278,16 @@ function loop(now){
   requestAnimationFrame(loop);
 }
 
+// a link with #name opens an example (index.html#trans) or a circuit plan (index.html#bridge_smooth)
+function openHash(h, announce){
+  if (PRESETS[h]){ loadPreset(h, announce); return true; }
+  const p=PLANS.find(x=>x.id===h && x.code), r=p && parseCode(p.code); if (!r || r.errs.length) return false;
+  applyData(r.data); setCircuit(tx(p.title), announce); save(); return true;
+}
 const hp=(typeof location!=='undefined' && location.hash || '').slice(1);
-if (PRESETS[hp]) loadPreset(hp); else if (!load()) loadPreset('flash');
+if (!openHash(hp) && !load()) loadPreset('flash');
 renderList();
-try { addEventListener('hashchange', () => { const h2=location.hash.slice(1); if (PRESETS[h2]) loadPreset(h2,true); }); } catch(e){}
+try { addEventListener('hashchange', () => openHash(location.hash.slice(1), true)); } catch(e){}
 resize(); renderInsp(); markPal(); applyLang();
 requestAnimationFrame(loop);
 })();
