@@ -63,6 +63,7 @@ const palName = tName;
 const BOOM = { dc:'big', ac:'big', cap:'big', res:'big', bulb:'pop', led:'pop', diode:'pop', am:'pop', sw:'pop', ind:'pop', tp:'pop', ts:'pop', fuse:'melt' };
 
 let comps = [], wires = [], uid = 1, sel = null, t = 0, running = true, elMode = false, speed = 1;
+let multi = new Set();   // several parts and wires selected together (box select, Ctrl+A, paste); sel is then null
 let dirty = true, topo = null, pendingPlace = null, placing = null, drag = null, hover = null;
 let hist = { v:[], i:[] };
 let ideal = true, circuitName = L('วงจรของฉัน','My circuit'), toastTimer = null;
@@ -590,6 +591,11 @@ function draw(){
   for (const w of wires){ bump(K(w.ax,w.ay)); bump(K(w.bx,w.by)); }
   for (const c of comps){ bump(K(c.ax,c.ay)); if (c.type!=='gnd') bump(K(c.bx,c.by)); }
 
+  if (multi.size){ ctx.save(); ctx.strokeStyle=C.accent; ctx.lineCap='round';
+    for (const x of multi){ ctx.globalAlpha=x.w?0.3:0.2; ctx.lineWidth=x.w?u*0.42:u*1.0; ctx.beginPath(); ctx.moveTo(P(x.ax),P(x.ay)); ctx.lineTo(P(x.bx),P(x.by)); ctx.stroke(); }
+    ctx.restore(); }
+  if (drag && drag.mode==='box' && drag.moved){ const x1=P(Math.min(drag.a.x,drag.b.x)), y1=P(Math.min(drag.a.y,drag.b.y)), x2=P(Math.max(drag.a.x,drag.b.x)), y2=P(Math.max(drag.a.y,drag.b.y));
+    ctx.save(); ctx.fillStyle='rgba(62,230,192,.08)'; ctx.strokeStyle=C.accent; ctx.lineWidth=1.5; ctx.setLineDash([6,4]); ctx.fillRect(x1,y1,x2-x1,y2-y1); ctx.strokeRect(x1,y1,x2-x1,y2-y1); ctx.restore(); }
   if (sel){ ctx.save(); ctx.strokeStyle=C.accent; ctx.globalAlpha=0.16; ctx.lineCap='round'; ctx.lineWidth=sel.w?u*0.42:u*1.0;
     ctx.beginPath(); ctx.moveTo(P(sel.ax),P(sel.ay)); ctx.lineTo(P(sel.bx),P(sel.by)); ctx.stroke();
     if (!sel.w){ const x1=Math.min(P(sel.ax),P(sel.bx))-u*0.55, y1=Math.min(P(sel.ay),P(sel.by))-u*0.55, x2=Math.max(P(sel.ax),P(sel.bx))+u*0.55, y2=Math.max(P(sel.ay),P(sel.by))+u*0.55;
@@ -925,6 +931,7 @@ const hitComp = g => { for (let k=comps.length-1;k>=0;k--) if (segHit(comps[k],g
 const hitWire = g => { for (let k=wires.length-1;k>=0;k--) if (segHit(wires[k],g,0,1,0.28)) return wires[k]; return null; };
 
 function place(type, g){
+  pushUndo();
   if (type==='tr'){   // a transformer is a primary and a secondary coil one row apart, paired by grp
     const y=Math.min(g.y,N-2), used=new Set(comps.filter(c=>c.type==='tp'||c.type==='ts').map(c=>c.grp)); let grp=1; while (used.has(grp)) grp++;
     const p=mk('tp',g.x-1,y,g.x+1,y,{grp}), q=mk('ts',g.x-1,y+1,g.x+1,y+1,{grp}); clampC(p); q.ax=p.ax; q.bx=p.bx;
@@ -936,11 +943,13 @@ cv.addEventListener('pointerdown', e => {
   const g=toGrid(e); cv.setPointerCapture(e.pointerId);
   if (pendingPlace){ place(pendingPlace, snap(g)); pendingPlace=null; markPal(); return; }
   if (tool==='idle') return;
-  if (tool==='select'){ openSelect(g, e); return; }
+  // the select tool (or Shift with the smart tool): a tap opens the popup / adds to the group, a drag draws a box around several things
+  if (tool==='select' || (tool==='smart' && e.shiftKey)){ closePop(); drag={mode:'box', a:g, b:g, moved:false, x:e.clientX, y:e.clientY, sel:tool==='select', shift:e.shiftKey}; return; }
   if (tool==='delete'){ deleteAt(g); return; }
   if (tool==='rotate'){ rotateAt(g); return; }
   closePop();
   const c=hitComp(g);
+  if (c && multi.has(c)){ drag={mode:'group', c, start:g, o:[...multi].map(x=>[x,x.ax,x.ay,x.bx,x.by]), dx:0, dy:0, moved:false}; return; }
   if (c){ drag={mode:'move',c,start:g,o:[c.ax,c.ay,c.bx,c.by],moved:false}; select(c); return; }
   const nd=nearNode(g);
   if (nd){ drag={mode:'wire',from:nd,to:nd}; return; }
@@ -949,22 +958,35 @@ cv.addEventListener('pointerdown', e => {
 cv.addEventListener('pointermove', e => {
   const g=toGrid(e); hover=nearNode(g); lastG=g; updateStatusHint();
   if (!drag) return;
+  if (drag.mode==='box'){ drag.b=g; if (Math.hypot(e.clientX-drag.x, e.clientY-drag.y)>8) drag.moved=true; return; }
+  if (drag.mode==='group'){ moveGroup(drag, Math.round(g.x-drag.start.x), Math.round(g.y-drag.start.y)); return; }
   if (drag.mode==='move'){
     const dx=Math.round(g.x-drag.start.x), dy=Math.round(g.y-drag.start.y), c=drag.c;
-    const [ax,ay,bx,by]=drag.o; const px=c.ax, py=c.ay;
-    c.ax=ax+dx; c.ay=ay+dy; c.bx=bx+dx; c.by=by+dy; clampC(c);
-    if (c.ax!==px||c.ay!==py){ drag.moved=true; dirty=true; }
+    const [ax,ay,bx,by]=drag.o, n={ax:ax+dx, ay:ay+dy, bx:bx+dx, by:by+dy}; clampC(n);
+    if (n.ax!==c.ax||n.ay!==c.ay){ if (!drag.moved){ pushUndo(); drag.moved=true; } Object.assign(c,n); dirty=true; }
   } else if (drag.mode==='wire') drag.to=snap(g);
 });
 cv.addEventListener('pointerup', () => {
   if (!drag) return; const d=drag; drag=null;
+  if (d.mode==='box'){
+    if (d.moved){ boxSelect(d.a, d.b); return; }
+    if (d.sel && !d.shift){ openSelect(d.a, {clientX:d.x, clientY:d.y}); return; }
+    const x=hitComp(d.a) || hitWire(d.a); if (!x) return;   // Shift+click: add to or remove from the group
+    const items=new Set(multi.size ? multi : sel ? [sel] : []); items.has(x) ? items.delete(x) : items.add(x); setMulti([...items]); return;
+  }
+  if (d.mode==='group'){
+    if (d.moved){ dedupeWires(); save(); return; }
+    if (d.c.type==='sw'){ pushUndo(); d.c.on=!d.c.on; dirty=true; save(); }
+    select(d.c); return;
+  }
   if (d.mode==='move'){
-    if (!d.moved && d.c.type==='sw'){ d.c.on=!d.c.on; dirty=true; renderInsp(); }
+    if (!d.moved && d.c.type==='sw'){ pushUndo(); d.c.on=!d.c.on; dirty=true; renderInsp(); }
     if (d.moved || d.c.type==='sw') save();
   } else if (d.mode==='wire'){
     const a=d.from, b=d.to;
     if (a.x!==b.x||a.y!==b.y){
-      if (addWire(a.x,a.y,b.x,b.y)){ dirty=true; save(); }
+      const before=snapState();
+      if (addWire(a.x,a.y,b.x,b.y)){ commitUndo(before); dirty=true; save(); }
     }
   }
 });
@@ -995,35 +1017,52 @@ function deleteSel(){
 document.addEventListener('keydown', e => {
   if (!$('#confirm').hidden && e.key!=='Escape') return;
   if ($('#confirm').hidden){
+    if (!gamePage.hidden){ gameKey(e); return; }
     if (!docPage.hidden){ if (e.key==='Escape') docBack();
       else if (les && (e.key==='ArrowRight'||e.key==='ArrowLeft') && !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName) && !e.altKey){ e.preventDefault(); lessonGo(les.at+(e.key==='ArrowRight'?1:-1), true); }
       return; }
     if (!menuPanel.hidden){ if (e.key==='Escape') closeMenu(); return; }
     if (!$('#codePanel').hidden){ if (e.key==='Escape') closeCode(); return; }
   }
+  if (!keysPanel.hidden){ if (e.key==='Escape'||e.key==='?') closeKeys(); return; }
   if (e.target.tagName==='INPUT'||e.target.tagName==='SELECT'||e.target.tagName==='TEXTAREA') return;
-  if ((e.ctrlKey||e.metaKey) && (e.key==='z'||e.key==='Z')){ e.preventDefault(); undo(); return; }
-  if (['1','2','3','4','5'].includes(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey){ setTool(['smart','select','rotate','delete','idle'][+e.key-1]); return; }
-  if (e.key==='r'||e.key==='R'){ rotateSel(); }
-  else if (e.key==='Delete'||e.key==='Backspace'){ if (sel){ e.preventDefault(); deleteSel(); } }
+  const mod=e.ctrlKey||e.metaKey, k=e.key.length===1 ? e.key.toLowerCase() : e.key;
+  if (mod && k==='z'){ e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+  if (mod && k==='y'){ e.preventDefault(); redo(); return; }
+  if (mod && k==='c'){ const cl=clipOf(selItems()); if (cl){ e.preventDefault(); clip=cl; say(L(`คัดลอก ${cl.comps.length+cl.wires.length} รายการแล้ว · Ctrl+V เพื่อวาง`,`Copied ${cl.comps.length+cl.wires.length} item(s) · Ctrl+V to paste`)); } return; }
+  if (mod && k==='v'){ e.preventDefault(); if (clip) pasteData(clip, hover); else say(L('ยังไม่ได้คัดลอกอะไร เลือกอุปกรณ์แล้วกด Ctrl+C ก่อน','Nothing copied yet: select something and press Ctrl+C first')); return; }
+  if (mod && k==='d'){ e.preventDefault(); duplicateSel(); return; }
+  if (mod && k==='a'){ e.preventDefault(); setMulti([...comps, ...wires]); return; }
+  if (mod || e.altKey) return;
+  if (e.key==='?'){ e.preventDefault(); openKeys(); return; }
+  if (['1','2','3','4','5'].includes(e.key)){ setTool(['smart','select','rotate','delete','idle'][+e.key-1]); return; }
+  if (e.key===' ' && (e.target===document.body || e.target===cv)){ e.preventDefault(); $('#play').click(); return; }
+  if (e.key.startsWith('Arrow')){
+    const dx=e.key==='ArrowRight'?1:e.key==='ArrowLeft'?-1:0, dy=e.key==='ArrowDown'?1:e.key==='ArrowUp'?-1:0;
+    if (e.shiftKey){ if (selItems().length){ e.preventDefault(); moveSelBy(dx, dy); } return; }
+    if (dy && sel && !sel.w){ e.preventDefault(); nudgeValue(sel, -dy); }
+    return;
+  }
+  if (k==='r'){ multi.size ? rotateGroup() : rotateSel(); }
+  else if (e.key==='Delete'||e.key==='Backspace'){ if (multi.size){ e.preventDefault(); deleteGroup(); } else if (sel){ e.preventDefault(); deleteSel(); } }
   else if (e.key==='Escape'){ if (!$('#confirm').hidden){ closeConfirm(); return; } if (popAnchor){ closePop(); return; } pendingPlace=null; markPal(); select(null); }
 });
 
 /* ---------- tools ---------- */
 let tool='smart', lastG=null, toast=null, popAnchor=null;
-const popEdit=new Set(), undoStack=[];
+const popEdit=new Set(), undoStack=[], redoStack=[];
 const TOOL_HINT = {
   idle:'โหมดว่าง: คลิกบนแผงแล้วจะไม่มีอะไรเปลี่ยน ชี้ที่จุดเพื่อดูศักย์ได้',
-  smart:'อัจฉริยะ: ลากจากจุดถึงจุดเพื่อต่อสาย · ลากอุปกรณ์เพื่อย้าย · แตะอุปกรณ์เพื่อเลือก · แตะสวิตช์เพื่อเปิดปิด',
+  smart:'อัจฉริยะ: ลากจากจุดถึงจุดเพื่อต่อสาย · ลากอุปกรณ์เพื่อย้าย · แตะอุปกรณ์เพื่อเลือก · แตะสวิตช์เพื่อเปิดปิด · Shift+ลากเลือกหลายชิ้น · ? คีย์ลัด',
   rotate:'หมุน: คลิกอุปกรณ์เพื่อหมุนตามเข็มนาฬิกา 90° · คลิกซ้ำเพื่อหมุนต่อ · Ctrl+Z ย้อนกลับ',
-  select:'เลือก: คลิกที่จุดหรืออุปกรณ์ แล้วเลือกว่าจะปรับค่า พักการทำงาน หรือลบ',
+  select:'เลือก: คลิกที่จุดหรืออุปกรณ์ แล้วเลือกว่าจะปรับค่า พักการทำงาน หรือลบ · ลากเป็นกรอบเพื่อเลือกหลายชิ้น',
   delete:'ลบ: คลิกที่จุดเพื่อลบทุกอย่างที่ต่ออยู่ตรงนั้น · คลิกตัวอุปกรณ์หรือสายเพื่อลบชิ้นเดียว · Ctrl+Z ย้อนกลับ'
 };
 const TOOL_HINT_EN = {
   idle:'Idle: clicking the board changes nothing. Point at a node to see its potential',
-  smart:'Smart: drag from node to node to add a wire · drag a part to move it · tap a part to select it · tap a switch to flip it',
+  smart:'Smart: drag from node to node to add a wire · drag a part to move it · tap a part to select it · tap a switch to flip it · Shift+drag selects several · ? shortcuts',
   rotate:'Rotate: click a part to turn it 90° clockwise · click again to keep turning · Ctrl+Z to undo',
-  select:'Select: click a node or a part, then choose to edit, disable or delete',
+  select:'Select: click a node or a part, then choose to edit, disable or delete · drag a box to select several',
   delete:'Delete: click a node to delete everything connected there · click a part or a wire to delete only that · Ctrl+Z to undo'
 };
 function say(text){ toast={text, until:performance.now()+2600}; updateStatusHint(); }
@@ -1043,12 +1082,156 @@ function targetsAt(g){
   const w=hitWire(g); if (w) return {items:[{w}]};
   return {items:[]};
 }
-function pushUndo(){ if (!comps.length && !wires.length) return; undoStack.push(JSON.stringify(serialize())); if (undoStack.length>60) undoStack.shift(); }
+// undo / redo: every change takes a snapshot first (a new change clears the redo list)
+const snapState = () => JSON.stringify(serialize());
+function commitUndo(s){ if (undoStack[undoStack.length-1]!==s) undoStack.push(s); if (undoStack.length>60) undoStack.shift(); redoStack.length=0; }
+function pushUndo(){ commitUndo(snapState()); }
 function undo(){
   const st=undoStack.pop(); if (!st){ say(L('ไม่มีอะไรให้ย้อนกลับแล้ว','Nothing left to undo')); return; }
-  applyData(JSON.parse(st)); closePop(); say(L('ย้อนกลับแล้ว','Undone'));
+  redoStack.push(snapState()); applyData(JSON.parse(st)); closePop(); say(L('ย้อนกลับแล้ว · Ctrl+Y ทำซ้ำ','Undone · Ctrl+Y to redo'));
 }
-$('#undo').onclick=undo;
+function redo(){
+  const st=redoStack.pop(); if (!st){ say(L('ไม่มีอะไรให้ทำซ้ำ','Nothing to redo')); return; }
+  undoStack.push(snapState()); applyData(JSON.parse(st)); closePop(); say(L('ทำซ้ำแล้ว','Redone'));
+}
+$('#undo').onclick=undo; $('#redo').onclick=redo;
+
+/* several things at once: box select, group move / rotate / delete, copy, paste, duplicate, quick value changes */
+const selItems = () => multi.size ? [...multi] : sel ? [sel] : [];
+function setMulti(items){
+  items=items.filter(Boolean); multi.clear();
+  if (items.length===1){ select(items[0]); return; }
+  for (const x of items) multi.add(x);
+  if (sel!==null){ sel=null; hist={v:[],i:[]}; }
+  closePop(); renderInsp(); updateList();
+  if (items.length) say(L(`เลือก ${items.length} รายการ · ลากเพื่อย้าย R หมุน Delete ลบ Ctrl+D ทำสำเนา`,`${items.length} items selected · drag to move, R rotates, Delete removes, Ctrl+D duplicates`));
+}
+function boxSelect(a, b){
+  const x0=Math.min(a.x,b.x)-0.3, x1=Math.max(a.x,b.x)+0.3, y0=Math.min(a.y,b.y)-0.3, y1=Math.max(a.y,b.y)+0.3;
+  const inside = el => [[el.ax,el.ay],[el.bx,el.by]].every(([x,y])=>x>=x0&&x<=x1&&y>=y0&&y<=y1);
+  const items=[...comps.filter(inside), ...wires.filter(inside)];
+  if (!items.length){ select(null); return; }
+  setMulti(items);
+}
+const wkey = w => w.ax<w.bx||(w.ax===w.bx&&w.ay<=w.by) ? `${w.ax},${w.ay},${w.bx},${w.by}` : `${w.bx},${w.by},${w.ax},${w.ay}`;
+function dedupeWires(){ const seen=new Set(); wires=wires.filter(w=>{ const k=wkey(w); if (seen.has(k)) return false; seen.add(k); return true; }); for (const x of [...multi]) if (x.w && !wires.includes(x)) multi.delete(x); dirty=true; }
+// bounds of a list of [item, ax, ay, bx, by] and the allowed shift that keeps it on the board
+function groupShift(o, dx, dy){
+  let x0=N, y0=N, x1=-1, y1=-1; for (const [,ax,ay,bx,by] of o){ x0=Math.min(x0,ax,bx); x1=Math.max(x1,ax,bx); y0=Math.min(y0,ay,by); y1=Math.max(y1,ay,by); }
+  return [Math.max(-x0, Math.min(N-1-x1, dx)), Math.max(-y0, Math.min(N-1-y1, dy))];
+}
+function moveGroup(d, dx, dy){
+  [dx, dy]=groupShift(d.o, dx, dy); if (dx===d.dx && dy===d.dy) return;
+  if (!d.moved){ pushUndo(); d.moved=true; }
+  d.dx=dx; d.dy=dy; for (const [x,ax,ay,bx,by] of d.o){ x.ax=ax+dx; x.ay=ay+dy; x.bx=bx+dx; x.by=by+dy; }
+  dirty=true;
+}
+let moveAt=0, nudgeAt=0, nudgeC=null;
+function moveSelBy(dx, dy){
+  const items=selItems(), o=items.map(x=>[x,x.ax,x.ay,x.bx,x.by]); [dx, dy]=groupShift(o, dx, dy); if (!dx && !dy) return;
+  const now=performance.now(); if (now-moveAt>1200) pushUndo(); moveAt=now;
+  for (const x of items){ x.ax+=dx; x.ay+=dy; x.bx+=dx; x.by+=dy; }
+  if (items.some(x=>x.w)) dedupeWires(); dirty=true; save();
+}
+function rotateGroup(){
+  const items=selItems(); if (!items.length) return; if (items.length===1 && !items[0].w){ rotateSel(); return; }
+  pushUndo();
+  let x0=N, y0=N, x1=-1, y1=-1; for (const x of items){ x0=Math.min(x0,x.ax,x.bx); x1=Math.max(x1,x.ax,x.bx); y0=Math.min(y0,x.ay,x.by); y1=Math.max(y1,x.ay,x.by); }
+  const cx=Math.round((x0+x1)/2), cy=Math.round((y0+y1)/2), rot=(x,y)=>[cx-(y-cy), cy+(x-cx)];   // 90° clockwise on screen (y points down)
+  for (const x of items){ [x.ax,x.ay]=rot(x.ax,x.ay); [x.bx,x.by]=rot(x.bx,x.by); }
+  const [dx,dy]=groupShift(items.map(x=>[x,x.ax,x.ay,x.bx,x.by]), 0, 0);
+  for (const x of items){ x.ax+=dx; x.ay+=dy; x.bx+=dx; x.by+=dy; }
+  dedupeWires(); dirty=true; save(); renderInsp();
+  say(L(`หมุน ${items.length} รายการตามเข็มนาฬิกา 90° แล้ว · Ctrl+Z ย้อนกลับ`,`Rotated ${items.length} items 90° clockwise · Ctrl+Z to undo`));
+}
+function deleteGroup(){
+  const items=new Set(selItems()); if (!items.size) return; pushUndo();
+  comps=comps.filter(c=>!items.has(c)); wires=wires.filter(w=>!items.has(w)); multi.clear(); dirty=true; select(null); save();
+  say(L(`ลบ ${items.size} รายการแล้ว · Ctrl+Z ย้อนกลับ`,`Deleted ${items.size} items · Ctrl+Z to undo`));
+}
+function offGroup(){
+  const cs=selItems().filter(x=>!x.w); if (!cs.length) return; pushUndo();
+  const to=!cs.every(c=>c.off); for (const c of cs) c.off=to; dirty=true; save(); renderInsp();
+}
+// copy: parts (with their values) and wires, as plain data. Paste: new numbers, no copied names, transformer coils get a free pair number
+let clip=null;
+function clipOf(items){
+  const cs=items.filter(x=>x && !x.w), ws=items.filter(x=>x && x.w); if (!cs.length && !ws.length) return null;
+  return { comps: cs.map(c=>{ const o={type:c.type,ax:c.ax,ay:c.ay,bx:c.bx,by:c.by}; for (const k in T[c.type].def) o[k]=c[k]; if (c.off) o.off=1; return o; }),
+    wires: ws.map(w=>[w.ax,w.ay,w.bx,w.by,w.off?1:0]) };
+}
+function pasteData(cl, at){
+  const pts=[...cl.comps.flatMap(o=>[[o.ax,o.ay],[o.bx,o.by]]), ...cl.wires.flatMap(a=>[[a[0],a[1]],[a[2],a[3]]])];
+  const x0=Math.min(...pts.map(p=>p[0])), x1=Math.max(...pts.map(p=>p[0])), y0=Math.min(...pts.map(p=>p[1])), y1=Math.max(...pts.map(p=>p[1]));
+  const mids=new Set(comps.map(c=>K((c.ax+c.bx)/2,(c.ay+c.by)/2)));
+  const free=(dx,dy)=> x0+dx>=0 && x1+dx<=N-1 && y0+dy>=0 && y1+dy<=N-1 && cl.comps.every(o=>!mids.has(K((o.ax+o.bx)/2+dx,(o.ay+o.by)/2+dy)));
+  let d=null;
+  if (at && free(at.x-x0, at.y-y0)) d=[at.x-x0, at.y-y0];
+  for (let k=1; !d && k<N; k++) for (const [dx,dy] of [[k,k],[k,0],[0,k],[-k,k],[k,-k],[-k,0],[0,-k],[-k,-k]]) if (free(dx,dy)){ d=[dx,dy]; break; }
+  if (!d){ say(L('ไม่มีที่ว่างพอจะวาง ลองย้ายหรือลบบางอย่างก่อน','No free room to paste: move or delete something first')); return null; }
+  pushUndo();
+  const used=new Set(comps.filter(c=>c.type==='tp'||c.type==='ts').map(c=>c.grp)), grpMap=new Map();
+  const newGrp=g=>{ if (!grpMap.has(g)){ let n=1; while (used.has(n)) n++; used.add(n); grpMap.set(g,n); } return grpMap.get(g); };
+  const made=[];
+  for (const o of cl.comps){ const p={}; for (const k in T[o.type].def) p[k]=o[k]; if (o.type==='tp'||o.type==='ts') p.grp=newGrp(o.grp);
+    const c=mk(o.type, o.ax+d[0], o.ay+d[1], o.bx+d[0], o.by+d[1], p); if (o.off) c.off=true; comps.push(c); assignNum(c); made.push(c); }
+  const before=new Set(wires); for (const a of cl.wires) addWire(a[0]+d[0], a[1]+d[1], a[2]+d[0], a[3]+d[1], !!a[4]);
+  made.push(...wires.filter(w=>!before.has(w)));
+  dirty=true; save(); setMulti(made);
+  say(L(`วาง ${made.length} รายการแล้ว · Ctrl+Z ย้อนกลับ`,`Pasted ${made.length} item(s) · Ctrl+Z to undo`));
+  return made;
+}
+function duplicateSel(){ const cl=clipOf(selItems()); if (!cl){ say(L('เลือกอุปกรณ์ก่อน แล้วกด Ctrl+D เพื่อทำสำเนา','Select something first, then Ctrl+D duplicates it')); return; } pasteData(cl, null); }
+// quick value change: ↑/↓ or the mouse wheel on the selected part steps its main value (1-2-5 steps; ±1 V for a source; the LED colour cycles)
+const MAINF = { dc:'E', ac:'E', res:'R', bulb:'R', cap:'C', ind:'L', tp:'n', fuse:'Imax', led:'color' };
+function step125(v, dir){
+  const list=[]; const e=Math.floor(Math.log10(Math.max(v,1e-12)));
+  for (let k=e-2;k<=e+2;k++) for (const m of [1,2,5]) list.push(+(m*Math.pow(10,k)).toPrecision(6));
+  return dir>0 ? list.find(x=>x>v*(1+1e-9)) : [...list].reverse().find(x=>x<v*(1-1e-9));
+}
+function nudgeValue(c, dir){
+  const k=MAINF[c.type], f=k && shownFields(c.type).find(x=>x[0]===k);
+  if (!f){ say(L(`${lab(c)} ไม่มีค่าให้ปรับในโหมดนี้`,`${lab(c)} has no value to change in this mode`)); return; }
+  let v;
+  if (k==='color') v=((c.color|0)+dir+6)%6;
+  else if (k==='E') v=Math.round((c.E+dir)*10)/10;
+  else v=step125(c[k], dir);
+  if (v===undefined) return; v=Math.max(f[3], Math.min(f[4], v)); if (v===c[k]) return;
+  const now=performance.now(); if (c!==nudgeC || now-nudgeAt>1500) pushUndo(); nudgeC=c; nudgeAt=now;
+  c[k]=v; if (k==='color') c.vd=0; save();
+  document.querySelectorAll(`[data-cid="${c.id}"][data-k="${k}"]`).forEach(o=>{ o.value=v; o.removeAttribute('aria-invalid'); });
+  say(`${lab(c)} · ${fName(c.type,f)} = ${k==='color' ? fOpts(f)[v] : fmt(v, f[2])}`);
+}
+cv.addEventListener('wheel', e=>{
+  if (!sel || sel.w || hitComp(toGrid(e))!==sel) return;
+  e.preventDefault(); const now=performance.now(); if (now-(cv._wheelAt||0)<90) return; cv._wheelAt=now;
+  nudgeValue(sel, e.deltaY<0 ? 1 : -1);
+}, {passive:false});
+// the list of shortcuts (?)
+const keysPanel=$('#keysPanel');
+function keysHTML(){
+  const rows=[
+    ['1 – 5', L('เลือกเครื่องมือ อัจฉริยะ เลือก หมุน ลบ ว่าง','Pick a tool: smart, select, rotate, delete, idle')],
+    [L('ลากบนแผง (เครื่องมือเลือก) / Shift+ลาก','Drag on the board (select tool) / Shift+drag'), L('ตีกรอบเลือกหลายชิ้น','Box-select several things')],
+    ['Shift+'+L('คลิก','click'), L('เพิ่มหรือเอาออกจากกลุ่มที่เลือก','Add to or remove from the selection')],
+    ['Ctrl+A', L('เลือกทั้งหมด','Select everything')],
+    ['Ctrl+C / Ctrl+V', L('คัดลอก / วาง (วางตรงจุดที่ชี้ ถ้าว่าง)','Copy / paste (at the node you point at, if free)')],
+    ['Ctrl+D', L('ทำสำเนาสิ่งที่เลือก','Duplicate the selection')],
+    ['Ctrl+Z / Ctrl+Y', L('ย้อนกลับ / ทำซ้ำ (Ctrl+Shift+Z ก็ได้)','Undo / redo (Ctrl+Shift+Z works too)')],
+    ['R', L('หมุนสิ่งที่เลือก 90° ตามเข็มนาฬิกา','Rotate the selection 90° clockwise')],
+    ['Delete', L('ลบสิ่งที่เลือก','Delete the selection')],
+    ['↑ / ↓ · '+L('ล้อเมาส์','mouse wheel'), L('ปรับค่าหลักของอุปกรณ์ที่เลือก (R, C, L ทีละขั้น 1-2-5 · แรงเคลื่อนทีละ 1 V · สี LED)','Step the main value of the selected part (R, C, L in 1-2-5 steps · EMF by 1 V · LED colour)')],
+    ['Shift+'+L('ลูกศร','arrows'), L('ย้ายสิ่งที่เลือกทีละช่อง','Move the selection one cell')],
+    [L('เว้นวรรค','Space'), L('หยุดชั่วคราว / เล่นต่อ','Pause / resume')],
+    ['Esc', L('ยกเลิกการเลือก ปิดหน้าต่าง','Clear the selection, close a window')],
+    ['?', L('เปิดหน้านี้','Open this list')],
+  ];
+  return `<div class="krows">${rows.map(([k,d])=>`<div class="krow"><kbd>${esc(k)}</kbd><span>${esc(d)}</span></div>`).join('')}</div>`;
+}
+function openKeys(){ $('#kBody').innerHTML=keysHTML(); keysPanel.hidden=false; $('#kClose').focus(); }
+function closeKeys(){ keysPanel.hidden=true; }
+$('#keysBtn').onclick=openKeys; $('#kClose').onclick=closeKeys;
+keysPanel.addEventListener('click', e=>{ if (e.target===keysPanel) closeKeys(); });
 function deleteAt(g){
   const tg=targetsAt(g); if (!tg.items.length) return;
   pushUndo();
@@ -1079,7 +1262,7 @@ function renderPop(){
   for (const it of items){
     if (it.c){ const c=it.c, fs=shownFields(c.type), fn=f=>fName(c.type,f);
       h+=`<div class="pi${c.off?' off':''}" data-id="c${c.id}"><div class="pih"><span class="tag" style="--c:${tagCol(c)}">${labH(c)}</span><span class="cname">${tName(c.type)}${c.off?L(' · พักอยู่',' · disabled'):''}${c.broken?L(' · ไหม้',' · burnt'):''}</span></div>
-        <div class="pia">${fs.length?`<button data-a="edit" aria-expanded="${popEdit.has(c.id)}">${L('ปรับค่า','Edit')}</button>`:''}${c.type==='sw'?`<button data-a="sw">${c.on?L('ตัดสวิตช์','Open switch'):L('ต่อสวิตช์','Close switch')}</button>`:''}<button data-a="off">${c.off?L('เปิดใช้งาน','Enable'):L('พักการทำงาน','Disable')}</button><button data-a="del" class="danger">${L('ลบ','Delete')}</button></div>
+        <div class="pia">${fs.length?`<button data-a="edit" aria-expanded="${popEdit.has(c.id)}">${L('ปรับค่า','Edit')}</button>`:''}${c.type==='sw'?`<button data-a="sw">${c.on?L('ตัดสวิตช์','Open switch'):L('ต่อสวิตช์','Close switch')}</button>`:''}<button data-a="off">${c.off?L('เปิดใช้งาน','Enable'):L('พักการทำงาน','Disable')}</button><button data-a="dup">${L('ทำสำเนา','Duplicate')}</button><button data-a="del" class="danger">${L('ลบ','Delete')}</button></div>
         ${fs.length && popEdit.has(c.id) ? `<div class="cparams">${fs.map(f=>`<label class="pf" title="${fn(f)}"><span>${f[5]?fn(f):f[0]}</span>${fieldCtl(c,f,`aria-label="${lab(c)} ${fn(f)}"`)}<span>${f[2]}</span></label>`).join('')}</div>` : ''}</div>`;
     } else { const w=it.w;
       h+=`<div class="pi${w.off?' off':''}" data-id="w${w.id}"><div class="pih"><span class="tag" style="--c:var(--wire)">${L('สาย','Wire')}</span><span class="cname">(${w.ax}, ${w.ay}) → (${w.bx}, ${w.by})${w.off?L(' · พักอยู่',' · disabled'):''}${w.broken?L(' · ขาด',' · melted'):''}</span></div>
@@ -1099,7 +1282,8 @@ $('#pop').addEventListener('click', e=>{
   const id=b.closest('.pi').dataset.id, isC=id[0]==='c';
   const el=isC ? comps.find(x=>String(x.id)===id.slice(1)) : wires.find(x=>String(x.id)===id.slice(1)); if (!el) return;
   if (a==='edit'){ popEdit.has(el.id) ? popEdit.delete(el.id) : popEdit.add(el.id); renderPop(); return; }
-  if (a==='sw'){ el.on=!el.on; dirty=true; save(); }
+  if (a==='dup'){ closePop(); pasteData(clipOf([el]), null); return; }
+  if (a==='sw'){ pushUndo(); el.on=!el.on; dirty=true; save(); }
   else if (a==='off'){ pushUndo(); el.off=!el.off; dirty=true; save(); say(L(`${isC?lab(el):'สายไฟ'} ${el.off?'พักการทำงานแล้ว ยังอยู่บนแผงแต่ไม่ได้ต่อในวงจร':'กลับมาทำงานแล้ว'}`, `${isC?lab(el):'Wire'} ${el.off?'disabled: still on the board but not part of the circuit':'works again'}`)); }
   else if (a==='del'){ pushUndo(); if (isC) comps=comps.filter(x=>x!==el); else wires=wires.filter(x=>x!==el); if (sel===el) select(null); dirty=true; save(); say(L(`ลบ${isC?lab(el):'สายไฟ'}แล้ว · Ctrl+Z ย้อนกลับ`, `Deleted ${isC?lab(el):'the wire'} · Ctrl+Z to undo`)); }
   renderPop(); renderInsp();
@@ -1108,11 +1292,18 @@ document.addEventListener('pointerdown', e=>{ if (popAnchor && !e.target.closest
 
 /* ---------- inspector ---------- */
 const insp=$('#insp');
-function select(x){ if (sel!==x){ sel=x; hist={v:[],i:[]}; } renderInsp(); if (document.getElementById('clist')) updateList(); }
+function select(x){ multi.clear(); if (sel!==x){ sel=x; hist={v:[],i:[]}; } renderInsp(); if (document.getElementById('clist')) updateList(); }
 let shownBroken=null;
 const stateTag = el => el.broken ? `<span class="state st-dead" id="rSt">${L('ไหม้แล้ว','Burnt')}</span>` : `<span class="state st-ok" id="rSt">${L('ปกติ','OK')}</span>`;
 function repair(el){ el.broken=false; el.temp=TA; el.smokeT=0; if (!el.w){ el.vd=0; el.vp=0; el.ip=0; } dirty=true; }
 function renderInsp(){
+  if (!sel && multi.size){
+    const cs=[...multi].filter(x=>!x.w).length, ws=multi.size-cs;
+    insp.innerHTML=`<h3>${L(`เลือก ${multi.size} รายการ`,`${multi.size} items selected`)}</h3><p class="desc">${L(`อุปกรณ์ ${cs} ชิ้น · สายไฟ ${ws} ช่วง · ลากชิ้นใดก็ได้ในกลุ่มเพื่อย้ายทั้งกลุ่ม Shift+ลูกศรเลื่อนทีละช่อง`,`${cs} parts · ${ws} wire segments · drag any part of the group to move it all, Shift+arrows move it one cell`)}</p>
+      <div class="acts"><button id="gRot">${L('หมุน 90°','Rotate 90°')}</button><button id="gDup">${L('ทำสำเนา','Duplicate')}</button>${cs?`<button id="gOff">${L('พัก / เปิดใช้งาน','Disable / enable')}</button>`:''}<button id="gDel" class="danger">${L('ลบทั้งหมด','Delete all')}</button><button id="gNone">${L('ยกเลิกการเลือก','Clear selection')}</button></div>`;
+    $('#gRot').onclick=rotateGroup; $('#gDup').onclick=duplicateSel; $('#gDel').onclick=deleteGroup; $('#gNone').onclick=()=>select(null); if (cs) $('#gOff').onclick=offGroup;
+    return;
+  }
   if (!sel){
     insp.innerHTML=L(`<h3>วิธีใช้แผง</h3><ol class="howto">
       <li><b>วางอุปกรณ์</b> ลากจากแถบอุปกรณ์มาปล่อยบนแผง หรือแตะอุปกรณ์แล้วแตะจุดบนแผง</li>
@@ -1120,13 +1311,17 @@ function renderInsp(){
       <li><b>ย้าย</b> กดค้างที่ตัวอุปกรณ์แล้วลาก</li>
       <li><b>หมุน / ลบ</b> เลือกอุปกรณ์ แล้วกดปุ่มด้านล่าง หรือกด R / Delete</li>
       <li><b>สวิตช์</b> แตะเพื่อเปิดหรือปิด</li>
-      <li><b>วัดแรงดันที่จุด</b> ชี้ที่จุดบนแผง ดูค่าใต้แผง (เทียบกับขั้วลบของแหล่งจ่าย)</li></ol>`, `<h3>How to use the board</h3><ol class="howto">
+      <li><b>วัดแรงดันที่จุด</b> ชี้ที่จุดบนแผง ดูค่าใต้แผง (เทียบกับขั้วลบของแหล่งจ่าย)</li>
+      <li><b>หลายชิ้น</b> เครื่องมือเลือกแล้วลากเป็นกรอบ หรือ Shift+ลาก จากนั้นย้าย หมุน คัดลอก หรือลบพร้อมกัน</li>
+      <li><b>คีย์ลัด</b> กด ? เพื่อดูทั้งหมด เช่น Ctrl+Y ทำซ้ำ, Ctrl+D ทำสำเนา, ↑ ↓ ปรับค่า</li></ol>`, `<h3>How to use the board</h3><ol class="howto">
       <li><b>Place a part</b> drag it from the parts bar onto the board, or tap the part and then tap a node</li>
       <li><b>Add a wire</b> press any node and drag to another node</li>
       <li><b>Move</b> press and hold a part, then drag it</li>
       <li><b>Rotate / delete</b> select a part and use the buttons below, or press R / Delete</li>
       <li><b>Switch</b> tap it to open or close it</li>
-      <li><b>Voltage at a node</b> point at a node and read the value under the board (measured from the source's negative terminal)</li></ol>`);
+      <li><b>Voltage at a node</b> point at a node and read the value under the board (measured from the source's negative terminal)</li>
+      <li><b>Several things</b> with the select tool drag a box, or Shift+drag, then move, rotate, copy or delete them together</li>
+      <li><b>Shortcuts</b> press ? to see them all, e.g. Ctrl+Y redo, Ctrl+D duplicate, ↑ ↓ change a value</li></ol>`);
     return;
   }
   if (sel.w){
@@ -1145,10 +1340,10 @@ function renderInsp(){
   if (sel.type==='sw') h+=`<div class="acts" style="margin-bottom:8px"><button id="bSw">${sel.on?L('เปิดวงจร (ตัดไฟ)','Open (cut the current)'):L('ปิดวงจร (ต่อไฟ)','Close (let current flow)')}</button></div>`;
   h+=`<div class="reads"><div class="read"><small>${L('แรงดันคร่อม','Voltage')}</small><b id="rV">–</b></div><div class="read"><small>${L('กระแส','Current')}</small><b id="rI">–</b></div><div class="read"><small>${L('กำลัง','Power')}</small><b id="rP">–</b></div>
       <div class="read"><small>${L('อุณหภูมิ','Temperature')}</small><b id="rT">–</b></div><div class="read"><small>${L('ใช้พิกัดไป','Rating used')}</small><b id="rU">–</b></div><div class="read"><small>${sel.type==='dc'||sel.type==='ac'?L('พลังงานที่จ่าย','Energy supplied'):sel.type==='cap'||sel.type==='ind'?L('พลังงานสะสม','Energy stored'):L('พลังงานที่ใช้','Energy used')}</small><b id="rE">–</b></div></div>
-      <div class="acts">${sel.broken?`<button id="bFix" class="danger">${L('ซ่อมอุปกรณ์','Repair')}</button>`:''}<button id="bOff">${sel.off?L('เปิดใช้งาน','Enable'):L('พักการทำงาน','Disable')}</button><button id="bRot">${L('หมุน 90°','Rotate 90°')}</button><button id="bDel">${L('ลบอุปกรณ์','Delete')}</button></div>`;
+      <div class="acts">${sel.broken?`<button id="bFix" class="danger">${L('ซ่อมอุปกรณ์','Repair')}</button>`:''}<button id="bOff">${sel.off?L('เปิดใช้งาน','Enable'):L('พักการทำงาน','Disable')}</button><button id="bRot">${L('หมุน 90°','Rotate 90°')}</button><button id="bDup">${L('ทำสำเนา','Duplicate')}</button><button id="bDel">${L('ลบอุปกรณ์','Delete')}</button></div>`;
   insp.innerHTML=h;
-  if (sel.type==='sw') $('#bSw').onclick=()=>{ sel.on=!sel.on; dirty=true; save(); renderInsp(); };
-  $('#bRot').onclick=rotateSel; $('#bDel').onclick=deleteSel;
+  if (sel.type==='sw') $('#bSw').onclick=()=>{ pushUndo(); sel.on=!sel.on; dirty=true; save(); renderInsp(); };
+  $('#bRot').onclick=rotateSel; $('#bDel').onclick=deleteSel; $('#bDup').onclick=duplicateSel;
   $('#bOff').onclick=()=>{ pushUndo(); sel.off=!sel.off; dirty=true; save(); renderInsp(); renderPop(); };
   if (sel.broken) $('#bFix').onclick=()=>{ repair(sel); renderInsp(); };
 }
@@ -1196,7 +1391,7 @@ function updateList(){
   if (listSignature()!==listSig){ renderList(); return; }
   for (const row of $('#clist').querySelectorAll('.crow')){
     const c=comps.find(x=>x.id==row.dataset.cid); if (!c) continue;
-    row.classList.toggle('on', c===sel);
+    row.classList.toggle('on', c===sel || multi.has(c));
     const set=(k,v)=>{ const b=row.querySelector(`[data-l="${k}"]`); if (b && b.textContent!==v) b.textContent=v; };
     set('v', c.type==='am'?'–':fmt(c.v,'V')); set('i', c.type==='vm'?'–':fmt(c.i,'A'));
     set('p', c.type==='vm'||c.type==='am'?'–':fmt(Math.abs(c.v*c.i),'W')); set('t', c.type==='vm'?'–':Math.round(c.temp)+' °C');
@@ -1265,11 +1460,14 @@ $('#cNo').onclick=closeConfirm;
 $('#clist').addEventListener('click', e=>{
   const row=e.target.closest('.crow'); if (!row) return; const c=comps.find(x=>x.id==row.dataset.cid); if (!c) return;
   const act=e.target.closest('[data-act]');
-  if (act){ const a=act.dataset.act; if (a==='sw'){ c.on=!c.on; dirty=true; save(); } else if (a==='off'){ pushUndo(); c.off=!c.off; dirty=true; save(); renderPop(); } else repair(c); select(c); updateList(); return; }
+  if (act){ const a=act.dataset.act; if (a==='sw'){ pushUndo(); c.on=!c.on; dirty=true; save(); } else if (a==='off'){ pushUndo(); c.off=!c.off; dirty=true; save(); renderPop(); } else repair(c); select(c); updateList(); return; }
   if (sel!==c) select(c);
 });
+let editSnap=null;
+document.addEventListener('focusin', e=>{ if (e.target.dataset && e.target.dataset.cid) editSnap=snapState(); });
 document.addEventListener('input', e=>{
   const el=e.target; if (!el.dataset || !el.dataset.cid) return;
+  if (editSnap){ commitUndo(editSnap); editSnap=null; }
   const c=comps.find(x=>x.id==el.dataset.cid); if (!c) return;
   const f=T[c.type].fields.find(x=>x[0]===el.dataset.k); if (!f) return;
   const v=parseFloat(el.value);
@@ -1525,8 +1723,8 @@ $('#speed').onchange=e=>{ speed=parseFloat(e.target.value); };
 const setMode=m=>{ elMode=m; $('#mCur').setAttribute('aria-pressed',String(!m)); $('#mEl').setAttribute('aria-pressed',String(m)); };
 $('#mCur').onclick=()=>setMode(false); $('#mEl').onclick=()=>setMode(true);
 
-// the version (with an optional tag, e.g. '1.0.3.0 alpha') is written here and in the name of the version file ("version 2.0.0.0 alpha.txt"); change both together
-const VERSION = '2.0.0.0 alpha';
+// the version (with an optional tag, e.g. '1.0.3.0 alpha') is written here and in the name of the version file ("version 2.1.0.0 alpha.txt"); change both together
+const VERSION = '2.1.0.0 alpha';
 const verLabel = () => { const a=$('#ver'); a.textContent=L('เวอร์ชัน ','Version ')+VERSION; a.href=encodeURI('version '+VERSION+'.txt'); a.parentElement.hidden=false; };
 verLabel();
 
@@ -1720,17 +1918,20 @@ const partBox = (c, Px, Py, uu, pad) => { const x1=Math.min(Px(c.ax),Px(c.bx))-u
   return [x1, y1, Math.abs(Px(c.bx)-Px(c.ax))+2*uu*pad, Math.abs(Py(c.by)-Py(c.ay))+2*uu*pad]; };
 const rrect = (x, b, r) => { x.beginPath(); x.roundRect ? x.roundRect(b[0],b[1],b[2],b[3],r) : x.rect(b[0],b[1],b[2],b[3]); };
 // draw a circuit on a small board that fits the canvas. o: {fixH: keep the canvas height, flow, labels, time, maxH,
-// mode: 'flow' (paths with current glow, the rest dims) or 'meters' (rings on the meters), spot: a part to light up, still: paused with meters hidden, fx: bursts}
+// mode: 'flow' (paths with current glow, the rest dims) or 'meters' (rings on the meters), spot: a part to light up, still: paused with meters hidden, fx: bursts,
+// box: fixed area [x0, y0, x1, y1] instead of fitting the circuit (game boards), after(x, Px, Py, uu, W, H): extra drawing on top.
+// A hidden fault of a game (off + ghost) is drawn like a working part or wire; c.hide shows "?" instead of the value
 function drawMini(cv, st, o={}){
   const cs=st.comps, ws=st.wires;
   let x0=N, y0=N, x1=-1, y1=-1; const ext=(gx,gy)=>{ x0=Math.min(x0,gx); y0=Math.min(y0,gy); x1=Math.max(x1,gx); y1=Math.max(y1,gy); };
-  for (const c of cs){ ext(c.ax,c.ay); ext(c.bx,c.by); } for (const w of ws){ ext(w.ax,w.ay); ext(w.bx,w.by); }
-  if (x1<0){ x0=y0=0; x1=y1=4; }
-  x0--; y0--; x1++; y1++;
-  const gw=x1-x0+1, gh=y1-y0+1, W=cv.clientWidth||120;
+  if (o.box) [x0,y0,x1,y1]=o.box;
+  else { for (const c of cs){ ext(c.ax,c.ay); ext(c.bx,c.by); } for (const w of ws){ ext(w.ax,w.ay); ext(w.bx,w.by); }
+    if (x1<0){ x0=y0=0; x1=y1=4; }
+    x0--; y0--; x1++; y1++; }
+  const pad=o.box?0.7:0, cw=x1-x0+1, ch=y1-y0+1, gw=cw+pad, gh=ch+pad, W=cv.clientWidth||120;
   const H = o.fixH ? (cv.clientHeight||80) : Math.round(Math.min(W*gh/gw, o.maxH||1e9));
   if (!o.fixH) cv.style.height=H+'px';
-  const d=Math.min(window.devicePixelRatio||1, 2), uu=Math.min(W/gw, H/gh), ox=(W-uu*gw)/2, oy=(H-uu*gh)/2;
+  const d=Math.min(window.devicePixelRatio||1, 2), uu=Math.min(W/gw, H/gh), ox=(W-uu*cw)/2, oy=(H-uu*ch)/2;
   if (cv.width!==Math.round(W*d) || cv.height!==Math.round(H*d)){ cv.width=Math.round(W*d); cv.height=Math.round(H*d); }
   st.view={x0, y0, uu, ox, oy};
   const x=cv.getContext('2d'); x.setTransform(d,0,0,d,0,0);
@@ -1741,7 +1942,7 @@ function drawMini(cv, st, o={}){
     for (let gy=y0; gy<=y1; gy++) for (let gx=x0; gx<=x1; gx++){ x.beginPath(); x.arc(Px(gx),Py(gy),pr,0,7); x.fill(); }
     x.globalAlpha=1; }
   x.lineCap='round';
-  for (const w of ws){ if (w.off) continue; const ax=Px(w.ax), ay=Py(w.ay), bx=Px(w.bx), by=Py(w.by), dim=fl && !live(w);
+  for (const w of ws){ if (w.off && !w.ghost) continue; const ax=Px(w.ax), ay=Py(w.ay), bx=Px(w.bx), by=Py(w.by), dim=fl && !live(w);
     const seg=()=>{ x.beginPath(); x.moveTo(ax,ay); x.lineTo(bx,by); x.stroke(); };
     x.globalAlpha=dim?0.3:1;
     x.strokeStyle='rgba(0,0,0,.55)'; x.lineWidth=Math.max(2,uu*0.2); seg();
@@ -1757,14 +1958,15 @@ function drawMini(cv, st, o={}){
   for (const w of ws){ bump(K(w.ax,w.ay)); bump(K(w.bx,w.by)); }
   for (const c of cs){ bump(K(c.ax,c.ay)); if (c.type!=='gnd') bump(K(c.bx,c.by)); }
   for (const [k,n] of deg){ const gx=k%N, gy=(k-gx)/N; x.fillStyle=C.wire; x.beginPath(); x.arc(Px(gx),Py(gy), (n>=3?0.17:0.12)*uu, 0, 7); x.fill(); }
-  if (o.flow && !o.still){ const k=fl?1.3:1; for (const w of ws) flowDots(x, w, dotC, Px, Py, uu, k); for (const c of cs) if (c.type!=='vm' && c.type!=='gnd') flowDots(x, c, dotC, Px, Py, uu, k); }
+  if (o.flow && !o.still){ const k=(fl?1.3:1)*(o.dotK||1); for (const w of ws) flowDots(x, w, dotC, Px, Py, uu, k); for (const c of cs) if (c.type!=='vm' && c.type!=='gnd') flowDots(x, c, dotC, Px, Py, uu, k); }
   if (o.mode==='meters'){ const a=0.55+0.45*Math.sin(now/240);
     for (const c of cs) if (c.type==='vm' || c.type==='am'){ x.save(); x.strokeStyle=C.accent; x.globalAlpha=a; x.lineWidth=2; x.shadowColor=C.accent; x.shadowBlur=glow(10); rrect(x, partBox(c,Px,Py,uu,0.62), uu*0.3); x.stroke(); x.restore(); } }
   for (const f of o.fx||[]){ const k=(now-f.t)/700; if (k<0 || k>1) continue; const c=f.c, mx=(Px(c.ax)+Px(c.bx))/2, my=(Py(c.ay)+Py(c.by))/2;
     x.save(); x.globalCompositeOperation='lighter'; x.globalAlpha=1-k; x.fillStyle=C.glow; x.beginPath(); x.arc(mx,my,uu*(0.4+1.2*k),0,7); x.fill();
     x.strokeStyle=C.heat; x.lineWidth=3; x.beginPath(); x.arc(mx,my,uu*(0.6+2.4*k),0,7); x.stroke(); x.restore(); }
-  const fs=Math.max(10,Math.round(uu*0.36));
-  const label = c => { if (c.type==='gnd') return; const mx=(Px(c.ax)+Px(c.bx))/2, my=(Py(c.ay)+Py(c.by))/2, txt = o.still && (c.type==='vm'||c.type==='am') ? lab(c)+' ?' : labelText(c);
+  const fs=Math.min(16, Math.max(10,Math.round(uu*0.36)));
+  const label = c => { if (c.type==='gnd') return; const mx=(Px(c.ax)+Px(c.bx))/2, my=(Py(c.ay)+Py(c.by))/2,
+    txt = c.hide || (o.still && (c.type==='vm'||c.type==='am')) ? lab(c)+' ?' : labelText(c.ghost ? Object.assign({}, c, {off:false}) : c);
     if (c.ay===c.by) labelBox(x, txt, mx, my-uu*0.9, 'c', fs, W, H); else labelBox(x, txt, mx+uu*0.6, my, 'l', fs, W, H); };
   if (o.labels) for (const c of cs) label(c);
   if (o.time){ x.font=`500 ${Math.max(10,Math.round(uu*0.34))}px "IBM Plex Mono",monospace`; x.textAlign='left'; x.textBaseline='top'; x.fillStyle=C.muted;
@@ -1773,6 +1975,7 @@ function drawMini(cv, st, o={}){
     x.save(); x.fillStyle='rgba(2,8,6,.6)'; x.beginPath(); x.rect(0,0,W,H); x.roundRect ? x.roundRect(b[0],b[1],b[2],b[3],uu*0.35) : x.rect(b[0],b[1],b[2],b[3]); x.fill('evenodd');
     x.strokeStyle=C.accent; x.lineWidth=2; x.setLineDash([6,4]); x.lineDashOffset=-now*0.03; x.shadowColor=C.accent; x.shadowBlur=glow(12); rrect(x, b, uu*0.35); x.stroke(); x.restore();
     if (o.labels) label(o.spot); }
+  if (o.after) o.after(x, Px, Py, uu, W, H);
 }
 
 // the live example board on a page: tap a part to light it up (a switch also flips), slow motion, and the lesson modes
@@ -1849,6 +2052,7 @@ function drawMenuIcons(){
   const cv=menuPanel.querySelectorAll('.mitem canvas');
   if (cv[0]) drawSym(cv[0], 'res');
   [[cv[1],MENU_ICON],[cv[2],MENU_ICON3]].forEach(([c,code])=>{ const st=c && miniState(code); if (st) drawMini(c, st, {fixH:true}); });
+  if (cv[3]) drawSym(cv[3], 'led');
 }
 
 // navigation: a stack of views {v:'devs'|'dev'|'circs'|'circ'|'con'|'plans'|'plan'|'mine', id, at: lesson step, tab}
@@ -1863,7 +2067,7 @@ menuBtn.onclick=()=>{ menuPanel.hidden ? openMenu() : closeMenu(); };
 $('#menuClose').onclick=closeMenu;
 menuPanel.addEventListener('click', e=>{
   if (e.target===menuPanel){ closeMenu(); return; }
-  const go=e.target.closest('[data-go]'); if (go){ closeMenu(); openDoc({v:go.dataset.go}); return; }
+  const go=e.target.closest('[data-go]'); if (go){ closeMenu(); if (go.dataset.go==='game') gameOpen(); else openDoc({v:go.dataset.go}); return; }
   const lb=e.target.closest('[data-lang]'); if (lb) setLang(lb.dataset.lang);
 });
 $('#docBack').onclick=docBack; $('#docClose').onclick=closeDoc;
@@ -2161,6 +2365,504 @@ function renderDoc(){
   docBody.querySelectorAll('canvas[data-fig]').forEach(cv=>{ const f2=cv.dataset.fig && figure(cv.dataset.fig), st=stateFrom(f2); if (st) drawMini(cv, st, {fixH:true}); });
 }
 
+/* ---------- game modes (menu 04): levels played on a board of their own ---------- */
+// Six modes in three pairs; the second mode of a pair opens once every level of the first is passed (progress in circuit-lab-game).
+// A level runs on its own small state with the same solver (swapIn + step), is drawn by drawMini(), and gameEval() checks its goals
+// on separate copies of the circuit (every switch case, AC peaks over a full cycle). Nothing here touches the main board.
+const gamePage=$('#gamePage'), gameBody=$('#gameBody');
+const GAME_MODES = [{"id": "solve", "tier": 1, "title": "Solve it!", "sub": {"th": "จำกัดอุปกรณ์ ต่อให้สำเร็จ", "en": "Limited parts: make it work"}, "how": {"th": "ใช้อุปกรณ์และสายไฟเท่าที่มีในคลัง ต่อให้ครบทุกเป้าหมาย ชิ้นที่วางมาให้ล็อกไว้ ย้ายหรือลบไม่ได้ ใช้สายน้อยได้ดาวเพิ่ม", "en": "Use only what is in the stock to meet every goal. The parts already on the board are locked. Fewer wires earn more stars."}}, {"id": "king", "tier": 1, "title": "King of hill", "sub": {"th": "ทำแปลนเดิมให้ใช้สายและอุปกรณ์น้อยลง", "en": "The same plan with fewer wires and parts"}, "how": {"th": "เริ่มจากแปลนในเมนูแปลนวงจร ย้าย หมุน และลบสายหรืออุปกรณ์ที่ไม่จำเป็น โดยมิเตอร์ทุกตัวต้องอ่านเท่าเดิม และหลอดทุกดวงสว่างเท่าเดิม คะแนน = จำนวนช่วงสาย + จำนวนอุปกรณ์ ยิ่งน้อยยิ่งดี พอใจแล้วกด \"ส่งแปลน\"", "en": "Start from a plan of the Circuit plans menu. Move, rotate and remove what is not needed while every meter reads the same and every bulb stays as bright. Score = wire segments + parts: lower is better. Press \"Submit plan\" when you are happy."}}, {"id": "rush", "tier": 1, "title": "Rush", "sub": {"th": "หลอดติดเมื่อได้กระแสพอดี", "en": "Bulbs that light only at the right current"}, "how": {"th": "หลอดในโหมดนี้ติดเฉพาะเมื่อกระแสเข้าตามที่กำหนด (±5%) วงแหวนรอบหลอดบอกว่ากระแสน้อยไป (ส้ม) มากไป (แดง) หรือพอดี (เขียว) ใช้ตัวต้านทาน ถ่าน หรือหม้อแปลงในคลังปรับให้พอดี ไม่จับเวลา", "en": "Here a bulb lights only at its set current (±5%). The ring around it shows too little (orange), too much (red) or just right (green). Use the resistors, cells or transformer in stock to get it right. No clock."}}, {"id": "solveplus", "tier": 2, "from": "solve", "title": "Solve it +", "sub": {"th": "ยากขึ้น และมีเวลาจำกัด", "en": "Harder, and against the clock"}, "how": {"th": "เหมือน Solve it! แต่โจทย์ซับซ้อนกว่า และต้องเสร็จก่อนหมดเวลา เหลือเวลามากได้ดาวมาก", "en": "Like Solve it!, with harder puzzles that must be finished before time runs out. The more time left, the more stars."}}, {"id": "zero", "tier": 2, "from": "king", "title": "Zero day", "sub": {"th": "แปลนที่ดีที่สุด พร้อมเงื่อนไขเพิ่ม", "en": "The best plan, with extra conditions"}, "how": {"th": "เหมือน King of hill แต่จะผ่านได้ต้องได้คะแนนเท่ากับแปลนที่ดีที่สุด และทำตามเงื่อนไขเพิ่มของแต่ละด่าน เช่น ชิ้นที่ตรึงไว้กับที่ หรือจุดกราวที่ต้องอยู่ตรงขั้วลบ", "en": "Like King of hill, but you only pass by matching the best plan's score and meeting each level's extra conditions, such as pinned parts or a ground that must sit on the negative terminal."}}, {"id": "chase", "tier": 2, "from": "rush", "title": "Chase!", "sub": {"th": "ตามหาจุดที่หายไปหรือพัง", "en": "Find what is missing or broken"}, "how": {"th": "วงจรดูเหมือนต่อครบแต่ไม่ทำงาน ใช้เครื่องมือวัดแรงดัน (แตะสองจุด) และวัดกระแส (แตะสายหรืออุปกรณ์) หาจุดที่พัง แล้วใช้เครื่องมือซ่อม ซ่อมผิดได้จำกัด ช่วงที่ขาดจะมีแรงดันคร่อมแต่ไม่มีกระแส", "en": "The circuit looks complete but does not work. Use the voltage probe (tap two nodes) and the current probe (tap a wire or part) to find the fault, then use Fix. Wrong fixes are limited. A break has voltage across it but no current."}}];
+const LEVELS = [
+{"id": "s1", "mode": "solve", "title": {"th": "ต่อหลอดให้ติด", "en": "Light it up"}, "brief": {"th": "ถ่านกับหลอดวางไว้ให้แล้ว ต่อสายไฟให้หลอด B1 ติด", "en": "The battery and the bulb are in place. Wire them so bulb B1 lights."}, "hint": {"th": "กระแสต้องออกจากขั้วหนึ่งของถ่าน ผ่านหลอด แล้วกลับเข้าอีกขั้ว ถ้าต่อแค่ด้านเดียว กระแสจะกลับไปที่ถ่านทางไหน", "en": "Current must leave one terminal, pass the bulb and come back to the other. If you wire only one side, how does it get back?"}, "start": "CIRCUIT v1 ideal=1\nDC  2,6 2,4   E=9 name=E\nB   6,4 6,6   R=20 name=B1", "sol": "CIRCUIT v1 ideal=1\nDC  2,6 2,4   E=9 name=E\nB   6,4 6,6   R=20 name=B1\nW   2,4 6,4\nW   2,6 6,6", "box": [1, 2, 8, 7], "inv": [["wire", 12]], "goals": [{"k": "lit", "p": "B1"}], "par": 8},
+{"id": "s2", "mode": "solve", "title": {"th": "สองดวงสว่างเต็มที่", "en": "Both at full brightness"}, "brief": {"th": "ให้หลอด B1 และ B2 ได้แรงดัน 9 V เต็มทั้งสองดวง", "en": "Give bulbs B1 and B2 the full 9 V each."}, "hint": {"th": "ถ้าต่อเรียงกัน แรงดัน 9 V ต้องแบ่งให้สองดวง แต่ละดวงได้เท่าไร แล้วถ้าแต่ละดวงต่อตรงกับถ่านล่ะ", "en": "In a row the 9 V is shared by two bulbs: how much does each get? And if each one sits straight across the battery?"}, "start": "CIRCUIT v1 ideal=1\nDC  2,6 2,4   E=9 name=E\nB   6,4 6,6   R=20 name=B1\nB   9,4 9,6   R=20 name=B2", "sol": "CIRCUIT v1 ideal=1\nDC  2,6 2,4   E=9 name=E\nB   6,4 6,6   R=20 name=B1\nB   9,4 9,6   R=20 name=B2\n\nW   2,4 9,4\nW   2,6 9,6", "box": [1, 2, 10, 7], "inv": [["wire", 18]], "goals": [{"k": "range", "p": "B1", "q": "v", "lo": 8.9, "hi": 9.1, "abs": true}, {"k": "range", "p": "B2", "q": "v", "lo": 8.9, "hi": 9.1, "abs": true}], "par": 14},
+{"id": "s3", "mode": "solve", "title": {"th": "สวิตช์คุมดวงเดียว", "en": "One switch, one bulb"}, "brief": {"th": "วางสวิตช์ S1 ให้ B1 ติดตลอด แต่ B2 ติดเฉพาะตอน S1 ต่อ", "en": "Place switch S1 so that B1 is always lit, but B2 lights only while S1 is closed."}, "hint": {"th": "ถ้าสวิตช์อยู่ตรงที่กระแสของทั้งสองดวงต้องผ่าน ตัดแล้วจะดับกี่ดวง ลองหาทางที่เป็นของ B2 ดวงเดียว", "en": "If the switch sits where both bulbs' current must pass, how many go dark when it opens? Look for a path that belongs to B2 alone."}, "start": "CIRCUIT v1 ideal=1\nDC  2,6 2,4   E=9 name=E\nB   6,4 6,6   R=20 name=B1\nB   9,4 9,6   R=20 name=B2", "sol": "CIRCUIT v1 ideal=1\nDC  2,6 2,4   E=9 name=E\nB   6,4 6,6   R=20 name=B1\nB   9,4 9,6   R=20 name=B2\n\nS   6,4 8,4   name=S1\nW   2,4 6,4\nW   8,4 9,4\nW   2,6 9,6", "box": [1, 2, 10, 7], "inv": [["sw", 1], ["wire", 16]], "cases": [{"S1": 1}, {"S1": 0}], "goals": [{"k": "lit", "p": "B1"}, {"k": "lit", "p": "B2", "c": 0}, {"k": "dark", "p": "B2", "c": 1}], "par": 12},
+{"id": "s4", "mode": "solve", "title": {"th": "ตัวไหนก็ได้", "en": "Either switch"}, "brief": {"th": "วางสวิตช์ S1 และ S2 ให้ B1 ติดเมื่อสวิตช์ตัวใดตัวหนึ่งต่อ และดับเมื่อตัดทั้งคู่", "en": "Place switches S1 and S2 so that B1 lights when either one is closed and goes dark only when both are open."}, "hint": {"th": "ถ้าสองสวิตช์เรียงกัน ตัดตัวเดียวก็ขาดทั้งทาง แต่ถ้าแต่ละตัวเป็นทางของตัวเองไปที่เดียวกันล่ะ", "en": "Two switches in a row: open one and the only path breaks. What if each one is its own route to the same place?"}, "start": "CIRCUIT v1 ideal=1\nDC  2,7 2,5   E=9 name=E\nB   9,5 9,7   R=20 name=B1", "sol": "CIRCUIT v1 ideal=1\nDC  2,7 2,5   E=9 name=E\nB   9,5 9,7   R=20 name=B1\nS   2,5 4,5   name=S1\nS   2,5 2,3   name=S2\nW   2,3 4,3 4,5\nW   4,5 9,5\nW   2,7 9,7", "box": [1, 1, 10, 8], "inv": [["sw", 2], ["wire", 20]], "cases": [{"S1": 0, "S2": 0}, {"S1": 1, "S2": 0}, {"S1": 0, "S2": 1}, {"S1": 1, "S2": 1}], "goals": [{"k": "dark", "p": "B1", "c": 0}, {"k": "lit", "p": "B1", "c": 1}, {"k": "lit", "p": "B1", "c": 2}, {"k": "lit", "p": "B1", "c": 3}], "par": 16},
+{"id": "s5", "mode": "solve", "title": {"th": "ติดมิเตอร์ให้ถูก", "en": "Meters in the right place"}, "brief": {"th": "ต่อถ่านเข้ากับหลอดสองดวงที่ขนานกันอยู่ ให้แอมมิเตอร์วัดกระแสรวม (1 A) และโวลต์มิเตอร์วัดแรงดันคร่อมหลอด (12 V)", "en": "Connect the battery to the two parallel bulbs, with an ammeter reading the total current (1 A) and a voltmeter reading the voltage across a bulb (12 V)."}, "hint": {"th": "กระแสทั้งหมดต้องไหลผ่านแอมมิเตอร์ ส่วนโวลต์มิเตอร์ต้องแตะสองข้างของหลอด ถ้าโวลต์มิเตอร์อ่านติดลบ ลองหมุนกลับด้าน", "en": "All of the current must flow through the ammeter, while the voltmeter touches both ends of a bulb. If the voltmeter reads negative, turn it around."}, "start": "CIRCUIT v1 ideal=1\nDC  2,7 2,5   E=12 name=E\nB   7,5 7,7   R=24 name=B1\nB   11,5 11,7 R=24 name=B2\nW   7,5 11,5\nW   7,7 11,7", "sol": "CIRCUIT v1 ideal=1\nDC  2,7 2,5   E=12 name=E\nB   7,5 7,7   R=24 name=B1\nB   11,5 11,7 R=24 name=B2\nW   7,5 11,5\nW   7,7 11,7\n\nAM  2,3 4,3\nVM  13,5 13,7\nW   2,5 2,3\nW   4,3 7,3 7,5\nW   2,7 7,7\nW   11,5 13,5\nW   11,7 13,7", "box": [1, 1, 14, 9], "inv": [["am", 1], ["vm", 1], ["wire", 20]], "goals": [{"k": "lit", "p": "B1"}, {"k": "lit", "p": "B2"}, {"k": "meter", "t": "am", "lo": 0.99, "hi": 1.01}, {"k": "meter", "t": "vm", "lo": 11.9, "hi": 12.1}], "par": 16},
+{"id": "p1", "mode": "solveplus", "title": {"th": "สวิตช์หลักกับสวิตช์รอง", "en": "Main switch, sub switch"}, "brief": {"th": "S1 เป็นสวิตช์หลัก ตัดแล้วดับหมด ส่วน S2 คุม B2 ดวงเดียว: B1 ติดเมื่อ S1 ต่อ และ B2 ติดเมื่อ S1 กับ S2 ต่อทั้งคู่", "en": "S1 is the main switch: open it and everything goes dark. S2 only controls B2: B1 lights when S1 is closed, and B2 when S1 and S2 are both closed."}, "hint": {"th": "กระแสของ B2 ต้องผ่านสวิตช์กี่ตัว และกระแสของ B1 ต้องผ่านตัวไหนบ้าง ลองวาง S2 ไว้หลัง S1", "en": "How many switches must B2's current pass, and which ones does B1's? Try putting S2 after S1."}, "start": "CIRCUIT v1 ideal=1\nDC  2,8 2,6   E=9 name=E\nB   7,6 7,8   R=20 name=B1\nB   11,6 11,8 R=20 name=B2", "sol": "CIRCUIT v1 ideal=1\nDC  2,8 2,6   E=9 name=E\nB   7,6 7,8   R=20 name=B1\nB   11,6 11,8 R=20 name=B2\n\nS   2,6 2,4   name=S1\nS   7,4 9,4   name=S2\nW   2,4 7,4 7,6\nW   9,4 11,4 11,6\nW   2,8 11,8", "box": [1, 2, 12, 9], "inv": [["sw", 2], ["wire", 24]], "time": 90, "cases": [{"S1": 0, "S2": 0}, {"S1": 1, "S2": 0}, {"S1": 0, "S2": 1}, {"S1": 1, "S2": 1}], "goals": [{"k": "dark", "p": "B1", "c": 0}, {"k": "dark", "p": "B2", "c": 0}, {"k": "lit", "p": "B1", "c": 1}, {"k": "dark", "p": "B2", "c": 1}, {"k": "dark", "p": "B1", "c": 2}, {"k": "dark", "p": "B2", "c": 2}, {"k": "lit", "p": "B1", "c": 3}, {"k": "lit", "p": "B2", "c": 3}]},
+{"id": "p2", "mode": "solveplus", "title": {"th": "ทำให้ได้ 6 V", "en": "Make 6 V"}, "brief": {"th": "ใช้ตัวต้านทานในคลัง ทำให้โวลต์มิเตอร์ V อ่าน 6 V จากถ่าน 9 V", "en": "Use the resistors in stock to make voltmeter V read 6 V from the 9 V battery."}, "hint": {"th": "ตัวต้านทานอนุกรมแบ่งแรงดันตามสัดส่วนความต้านทาน 6 V คือสองในสามของ 9 V ส่วนที่โวลต์มิเตอร์คร่อมต้องมีความต้านทานเป็นกี่เท่าของส่วนที่เหลือ", "en": "Series resistors share the voltage in proportion. 6 V is two thirds of 9 V: how many times the rest must the part across the voltmeter be?"}, "start": "CIRCUIT v1 ideal=1\nDC  2,7 2,5   E=9 name=E\nVM  11,5 11,7 name=V", "sol": "CIRCUIT v1 ideal=1\nDC  2,7 2,5   E=9 name=E\nVM  11,5 11,7 name=V\n\nR   5,3 7,3   R=100\nR   9,5 9,7   R=200\nW   2,5 2,3 5,3\nW   7,3 9,3 9,5\nW   9,5 11,5\nW   9,7 11,7\nW   2,7 9,7", "box": [1, 2, 12, 8], "inv": [["res", 2, {"R": 100}], ["res", 1, {"R": 200}], ["res", 1, {"R": 300}], ["wire", 24]], "time": 90, "goals": [{"k": "range", "p": "V", "q": "v", "lo": 5.94, "hi": 6.06}]},
+{"id": "p3", "mode": "solveplus", "title": {"th": "กระแส 0.3 A พอดี", "en": "Exactly 0.3 A"}, "brief": {"th": "ทำให้แอมมิเตอร์ I อ่าน 0.3 A จากถ่าน 12 V", "en": "Make ammeter I read 0.3 A from the 12 V battery."}, "hint": {"th": "I = V/R ถ้าต้องการ 0.3 A จาก 12 V ความต้านทานรวมต้องเป็นเท่าไร แล้วตัวต้านทานในคลังรวมกันแบบไหนได้ค่านั้น", "en": "I = V/R. For 0.3 A from 12 V, what total resistance do you need, and which stock resistors add up to it?"}, "start": "CIRCUIT v1 ideal=1\nDC  2,7 2,5   E=12 name=E\nAM  6,3 8,3   name=I", "sol": "CIRCUIT v1 ideal=1\nDC  2,7 2,5   E=12 name=E\nAM  6,3 8,3   name=I\n\nR   8,3 10,3  R=20\nR   10,3 12,3 R=20\nW   2,5 2,3 6,3\nW   12,3 12,7 2,7", "box": [1, 2, 13, 8], "inv": [["res", 2, {"R": 20}], ["res", 1, {"R": 30}], ["res", 1, {"R": 60}], ["wire", 24]], "time": 75, "goals": [{"k": "range", "p": "I", "q": "i", "lo": 0.297, "hi": 0.303}]},
+{"id": "p4", "mode": "solveplus", "title": {"th": "LED สามสี", "en": "Three LEDs"}, "brief": {"th": "ให้ LED แดง เขียว และฟ้า ได้กระแส 15–25 mA ทุกดวงจากถ่าน 5 V", "en": "Give the red, green and blue LEDs 15–25 mA each from the 5 V battery."}, "hint": {"th": "สีฟ้าต้องการแรงดันมากที่สุด (ราว 3 V) จึงเหลือแรงดันให้ตัวต้านทานน้อยที่สุด ตัวต้านทานของมันควรใหญ่หรือเล็กกว่าของดวงอื่น", "en": "Blue needs the most voltage (about 3 V), leaving the least for its resistor. Should its resistor be bigger or smaller than the others'?"}, "start": "CIRCUIT v1 ideal=1\nDC  2,8 2,6   E=5 name=E\nLED 6,6 6,8   color=red name=RED\nLED 9,6 9,8   color=green name=GREEN\nLED 12,6 12,8 color=blue name=BLUE", "sol": "CIRCUIT v1 ideal=1\nDC  2,8 2,6   E=5 name=E\nLED 6,6 6,8   color=red name=RED\nLED 9,6 9,8   color=green name=GREEN\nLED 12,6 12,8 color=blue name=BLUE\n\nR   6,4 6,6   R=150\nR   9,4 9,6   R=150\nR   12,4 12,6 R=100\nW   2,6 2,4 12,4\nW   2,8 12,8", "box": [1, 2, 13, 9], "inv": [["res", 2, {"R": 150}], ["res", 1, {"R": 100}], ["res", 1, {"R": 47}], ["wire", 30]], "time": 150, "goals": [{"k": "range", "p": "RED", "q": "i", "lo": 0.015, "hi": 0.025}, {"k": "range", "p": "GREEN", "q": "i", "lo": 0.015, "hi": 0.025}, {"k": "range", "p": "BLUE", "q": "i", "lo": 0.015, "hi": 0.025}]},
+{"id": "k1", "mode": "king", "title": {"th": "ไฟฉายกะทัดรัด", "en": "A compact flashlight"}, "brief": {"th": "แปลน \"ไฟฉาย + มิเตอร์\" ใช้สายยาวมาก ทำคะแนนให้ต่ำลง โดยมิเตอร์ยังอ่าน 0.45 A กับ 9 V", "en": "The flashlight plan uses long wires. Bring its score down while the meters still read 0.45 A and 9 V."}, "hint": {"th": "ขาของอุปกรณ์สองชิ้นแตะจุดเดียวกันได้โดยไม่ต้องมีสาย ถ้าอุปกรณ์สี่ชิ้นที่ต่ออนุกรมกันเป็นสี่ด้านของสี่เหลี่ยม จะเหลือสายกี่ช่วง", "en": "Two parts can share a node with no wire. If four parts in series form the four sides of a square, how many wire segments are left?"}, "start": "CIRCUIT v1 ideal=1\nDC  3,9 3,7    E=9\nS   7,3 9,3\nAM  11,3 13,3\nB   16,7 16,9  R=20\nVM  18,7 18,9\nW   3,7 3,3 7,3\nW   9,3 11,3\nW   13,3 16,3 16,7\nW   16,9 16,14 3,14 3,9\nW   16,7 18,7\nW   16,9 18,9", "sol": "CIRCUIT v1 ideal=1\nDC  4,6 4,4   E=9\nS   4,4 6,4\nAM  6,4 6,6\nB   6,6 4,6   R=20\nVM  6,7 4,7\nW   6,6 6,7\nW   4,6 4,7", "box": [2, 2, 19, 15], "par": 12, "best": 7},
+{"id": "k2", "mode": "king", "title": {"th": "อนุกรมสามดวง", "en": "Three in series"}, "brief": {"th": "ทำแปลนหลอดสามดวงอนุกรมให้เล็กลง มิเตอร์ทุกตัวต้องอ่านเท่าเดิม", "en": "Shrink the three-bulbs-in-series plan. Every meter must read the same."}, "hint": {"th": "เรียงหลอดต่อกันเป็นแนวเดียว แล้ววางโวลต์มิเตอร์เป็นแนวคู่ขนานข้างๆ ขั้วของโวลต์มิเตอร์สองตัวที่อยู่ติดกันใช้จุดเดียวกันได้", "en": "Stack the bulbs in one line and the voltmeters in a line beside them: two neighbouring voltmeters can share a node."}, "start": "CIRCUIT v1 ideal=1\nDC  2,10 2,8   E=12 name=E\nAM  4,3 6,3    name=I\nB   9,4 9,6    R=8 name=B1\nB   9,8 9,10   R=8 name=B2\nB   9,12 9,14  R=8 name=B3\nVM  12,4 12,6  name=V1\nVM  12,8 12,10 name=V2\nVM  12,12 12,14 name=V3\nW   2,8 2,3 4,3\nW   6,3 9,3 9,4\nW   9,6 9,8\nW   9,10 9,12\nW   9,14 9,15\nW   2,10 2,15 9,15\nW   9,4 12,4\nW   9,6 12,6\nW   9,8 12,8\nW   9,10 12,10\nW   9,12 12,12\nW   9,14 12,14", "sol": "CIRCUIT v1 ideal=1\nB   4,4 4,6   R=8 name=B1\nB   4,6 4,8   R=8 name=B2\nB   4,8 4,10  R=8 name=B3\nVM  5,4 5,6   name=V1\nVM  5,6 5,8   name=V2\nVM  5,8 5,10  name=V3\nDC  6,10 6,8  E=12 name=E\nAM  6,8 6,6   name=I\nW   4,4 5,4\nW   4,6 5,6\nW   4,8 5,8\nW   4,10 5,10 6,10\nW   6,6 6,4 5,4", "box": [1, 2, 13, 16], "par": 20, "best": 16},
+{"id": "k3", "mode": "king", "title": {"th": "ขนานสามสาขา", "en": "Three branches"}, "brief": {"th": "ทำแปลนตัวต้านทานสามตัวขนานให้เล็กลง แอมมิเตอร์ทุกตัวต้องอ่านเท่าเดิม", "en": "Shrink the three-resistors-in-parallel plan. Every ammeter must read the same."}, "hint": {"th": "แต่ละสาขาคือแอมมิเตอร์ต่อกับตัวต้านทาน วางเรียงเป็นแนวตั้งชิดกัน แล้วใช้สายสั้นๆ เชื่อมหัวกับท้ายของทุกสาขา", "en": "Each branch is an ammeter on a resistor. Stand them side by side and join all their tops and all their bottoms with short wires."}, "start": "CIRCUIT v1 ideal=1\nDC  2,10 2,8   E=12 name=E\nAM  4,3 6,3    name=I_total\nAM  9,5 9,7    name=I_1\nAM  12,5 12,7  name=I_2\nAM  15,5 15,7  name=I_3\nR   9,9 9,11   R=12 name=R1\nR   12,9 12,11 R=24 name=R2\nR   15,9 15,11 R=6 name=R3\nW   2,8 2,3 4,3\nW   6,3 15,3\nW   9,3 9,5\nW   12,3 12,5\nW   15,3 15,5\nW   9,7 9,9\nW   12,7 12,9\nW   15,7 15,9\nW   9,11 9,14\nW   12,11 12,14\nW   15,11 15,14 2,14 2,10", "sol": "CIRCUIT v1 ideal=1\nDC  3,8 3,6   E=12 name=E\nAM  3,6 3,4   name=I_total\nAM  4,4 4,6   name=I_1\nR   4,6 4,8   R=12 name=R1\nAM  5,4 5,6   name=I_2\nR   5,6 5,8   R=24 name=R2\nAM  6,4 6,6   name=I_3\nR   6,6 6,8   R=6 name=R3\nW   3,4 6,4\nW   3,8 6,8", "box": [1, 2, 16, 15], "par": 18, "best": 14},
+{"id": "k4", "mode": "king", "title": {"th": "หลอด A B C", "en": "Bulbs A, B, C"}, "brief": {"th": "ทำแปลนหลอด A อนุกรมกับ B ขนาน C ให้เล็กลง ทุกดวงต้องสว่างเท่าเดิม", "en": "Shrink the A-in-series-with-B-parallel-C plan. Every bulb must stay as bright."}, "hint": {"th": "B กับ C ขนานกัน จึงวางคู่กันโดยมีสายสั้นเชื่อมหัวและท้าย ส่วน A กับถ่านต่อเข้ามุมได้เลยโดยไม่ต้องมีสาย", "en": "B and C are in parallel: put them side by side with short wires at both ends. A and the battery can meet at the corners with no wire."}, "start": "CIRCUIT v1 ideal=1\nDC  2,10 2,8   E=12 name=E\nB   5,3 7,3    R=6 name=A\nB   10,7 10,9  R=6 name=B\nB   14,7 14,9  R=6 name=C\nW   2,8 2,3 5,3\nW   7,3 14,3 14,7\nW   10,3 10,7\nW   10,9 10,13\nW   14,9 14,13 2,13 2,10", "sol": "CIRCUIT v1 ideal=1\nDC  4,6 4,4   E=12 name=E\nB   4,4 6,4   R=6 name=A\nB   6,4 6,6   R=6 name=B\nB   7,4 7,6   R=6 name=C\nW   6,6 4,6\nW   6,4 7,4\nW   6,6 7,6", "box": [1, 2, 15, 14], "par": 12, "best": 8},
+{"id": "k5", "mode": "king", "title": {"th": "สองแหล่งจ่าย", "en": "Two sources"}, "brief": {"th": "ทำแปลนแหล่งจ่ายสองตัวให้เล็กลง I_1, I_2 และ I_3 ต้องอ่านเท่าเดิม", "en": "Shrink the two-sources plan. I_1, I_2 and I_3 must read the same."}, "hint": {"th": "ทั้งสามสาขาเริ่มที่จุดเดียวกัน (ขั้วลบ) และจบที่จุดเดียวกัน ลองให้สาขากลางตรงขึ้นไป แล้วอีกสองสาขาอ้อมทางซ้ายกับทางขวา", "en": "All three branches start at one node (the negative side) and end at another. Run the middle branch straight up and the other two around the left and the right."}, "start": "CIRCUIT v1 ideal=1\nDC  2,10 2,8   E=12 name=E1\nR   3,3 5,3    R=4 name=R1\nAM  5,3 7,3    name=I_1\nAM  13,3 11,3  name=I_2\nR   13,3 15,3  R=2 name=R2\nDC  16,10 16,8 E=9 name=E2\nAM  9,5 9,7    name=I_3\nR   9,9 9,11   R=4 name=R3\nW   2,8 2,3 3,3\nW   7,3 11,3\nW   9,3 9,5\nW   9,7 9,9\nW   15,3 16,3 16,8\nW   9,11 9,13\nW   2,10 2,13 16,13 16,10", "sol": "CIRCUIT v1 ideal=1\nDC  8,8 6,8   E=12 name=E1\nR   6,8 6,6   R=4 name=R1\nAM  6,4 8,4   name=I_1\nAM  8,4 8,6   name=I_3\nR   8,6 8,8   R=4 name=R3\nDC  8,8 10,8  E=9 name=E2\nR   10,8 10,6 R=2 name=R2\nAM  10,4 8,4  name=I_2\nW   6,6 6,4\nW   10,6 10,4", "box": [1, 2, 17, 14], "par": 16, "best": 12},
+{"id": "z1", "mode": "zero", "title": {"th": "ถ่านตรึง", "en": "Pinned cells"}, "brief": {"th": "ถ่านสองก้อนต่อขนาน E1 กับ E2 ตรึงอยู่กับที่ ย้ายไม่ได้ ต้องได้คะแนนไม่เกิน 17", "en": "Two cells in parallel with E1 and E2 pinned in place. Reach a score of 17 or less."}, "hint": {"th": "แอมมิเตอร์ของถ่านแต่ละก้อนชี้ขึ้นได้ ทำให้หัวทั้งสองอยู่แถวเดียวกัน แล้วหลอดกับโวลต์มิเตอร์ยืนอยู่ระหว่างแถวบนกับแถวล่าง", "en": "Each cell's ammeter can point up so both tops are on one row; the bulb and the voltmeter then stand between the top row and the bottom row."}, "start": "CIRCUIT v1 ideal=1\nDC  2,10 2,8   E=6 name=E1\nDC  6,10 6,8   E=6 name=E2\nAM  2,6 2,4    name=I_1\nAM  6,6 6,4    name=I_2\nB   12,8 12,10 R=12 name=B1\nVM  15,8 15,10 name=V\nW   2,8 2,6\nW   6,8 6,6\nW   2,4 2,3 12,3 12,8\nW   6,4 6,3\nW   12,10 12,15 2,15 2,10\nW   6,10 6,15\nW   12,8 15,8\nW   12,10 15,10", "sol": "CIRCUIT v1 ideal=1\nDC  2,10 2,8  E=6 name=E1\nDC  6,10 6,8  E=6 name=E2\nAM  2,8 2,6   name=I_1\nAM  6,8 6,6   name=I_2\nB   4,10 4,8  R=12 name=B1\nVM  3,8 3,10  name=V\nW   2,6 6,6\nW   2,10 6,10\nW   4,8 4,6\nW   3,8 4,8", "box": [1, 2, 16, 16], "lock": ["E1", "E2"], "best": 17},
+{"id": "z2", "mode": "zero", "title": {"th": "กราวต้องอยู่ที่เดิม", "en": "Ground where it belongs"}, "brief": {"th": "ตัวแบ่งแรงดันสามตัว คะแนนต้องไม่เกิน 17 และจุดกราวต้องต่ออยู่ที่ขั้วลบของถ่าน E", "en": "The three-resistor divider. Score 17 or less, with the ground on the negative terminal of E."}, "hint": {"th": "เรียงตัวต้านทานเป็นแนวเดียว วางโวลต์มิเตอร์เป็นแนวคู่ขนาน แล้วให้ขา a ของกราวแตะจุดเดียวกับขั้วลบของถ่าน", "en": "Stack the resistors in a line with the voltmeters alongside, then let the ground's leg a touch the battery's negative terminal."}, "start": "CIRCUIT v1 ideal=1\nDC  2,10 2,8   E=12 name=E\nAM  4,3 6,3    name=I\nR   9,4 9,6    R=100 name=R1\nR   9,8 9,10   R=200 name=R2\nR   9,12 9,14  R=300 name=R3\nVM  12,4 12,6  name=V_R1\nVM  12,8 12,10 name=V_R2\nVM  12,12 12,14 name=V_R3\nGND 4,15 4,17\nW   2,8 2,3 4,3\nW   6,3 9,3 9,4\nW   9,6 9,8\nW   9,10 9,12\nW   9,14 9,15\nW   2,10 2,15 9,15\nW   9,4 12,4\nW   9,6 12,6\nW   9,8 12,8\nW   9,10 12,10\nW   9,12 12,12\nW   9,14 12,14", "sol": "CIRCUIT v1 ideal=1\nR   4,4 4,6   R=100 name=R1\nR   4,6 4,8   R=200 name=R2\nR   4,8 4,10  R=300 name=R3\nVM  5,4 5,6   name=V_R1\nVM  5,6 5,8   name=V_R2\nVM  5,8 5,10  name=V_R3\nDC  6,10 6,8  E=12 name=E\nAM  6,8 6,6   name=I\nGND 6,10 6,12\nW   4,4 5,4\nW   4,6 5,6\nW   4,8 5,8\nW   4,10 5,10 6,10\nW   6,6 6,4 5,4", "box": [1, 2, 13, 18], "best": 17, "goals": [{"k": "node", "a": "GND1", "al": "a", "b": "E", "bl": "a", "txt": {"th": "จุดกราวต่อที่ขั้วลบของถ่าน E", "en": "The ground is on the negative terminal of E"}}]},
+{"id": "z3", "mode": "zero", "title": {"th": "เพิ่มแอมมิเตอร์", "en": "Add an ammeter"}, "brief": {"th": "หลอด A B C ต้องสว่างเท่าเดิม และต้องเพิ่มแอมมิเตอร์หนึ่งตัววัดกระแสรวม 1.33 A คะแนนไม่เกิน 7", "en": "Bulbs A, B and C stay as bright, and one added ammeter must read the total current, 1.33 A. Score 7 or less."}, "hint": {"th": "ถ้าอุปกรณ์อนุกรมสี่ชิ้นเป็นสี่ด้านของสี่เหลี่ยม ไม่ต้องใช้สายเลย แอมมิเตอร์ที่เพิ่มเข้าไปคือชิ้นที่สี่", "en": "Four series parts as the four sides of a square need no wire at all, and the ammeter you add is the fourth."}, "start": "CIRCUIT v1 ideal=1\nDC  2,10 2,8   E=12 name=E\nB   5,3 7,3    R=6 name=A\nB   10,7 10,9  R=6 name=B\nB   14,7 14,9  R=6 name=C\nW   2,8 2,3 5,3\nW   7,3 14,3 14,7\nW   10,3 10,7\nW   10,9 10,13\nW   14,9 14,13 2,13 2,10", "sol": "CIRCUIT v1 ideal=1\nDC  4,6 4,4   E=12 name=E\nAM  4,4 6,4\nB   6,4 6,6   R=6 name=A\nB   6,6 4,6   R=6 name=B\nB   6,7 4,7   R=6 name=C\nW   6,6 6,7\nW   4,6 4,7", "box": [1, 2, 15, 14], "inv": [["am", 1]], "best": 7, "goals": [{"k": "meter", "t": "am", "lo": 1.32, "hi": 1.347}]},
+{"id": "z4", "mode": "zero", "title": {"th": "สาขากลางตรึง", "en": "Pinned middle branch"}, "brief": {"th": "แหล่งจ่ายสองตัว ที่ I_3 กับ R3 ตรึงอยู่กับที่ ต้องได้คะแนนไม่เกิน 14", "en": "Two sources with I_3 and R3 pinned in place. Reach a score of 14 or less."}, "hint": {"th": "สาขาซ้ายและขวาวิ่งขนานไปกับสาขากลางได้ โดยห่างจากมันหนึ่งช่อง", "en": "The left and right branches can run alongside the middle one, one cell away."}, "start": "CIRCUIT v1 ideal=1\nDC  2,10 2,8   E=12 name=E1\nR   3,3 5,3    R=4 name=R1\nAM  5,3 7,3    name=I_1\nAM  13,3 11,3  name=I_2\nR   13,3 15,3  R=2 name=R2\nDC  16,10 16,8 E=9 name=E2\nAM  9,5 9,7    name=I_3\nR   9,9 9,11   R=4 name=R3\nW   2,8 2,3 3,3\nW   7,3 11,3\nW   9,3 9,5\nW   9,7 9,9\nW   15,3 16,3 16,8\nW   9,11 9,13\nW   2,10 2,13 16,13 16,10", "sol": "CIRCUIT v1 ideal=1\nAM  9,5 9,7   name=I_3\nR   9,9 9,11  R=4 name=R3\nW   9,7 9,9\nDC  8,11 8,9  E=12 name=E1\nR   8,9 8,7   R=4 name=R1\nAM  8,7 8,5   name=I_1\nDC  10,11 10,9 E=9 name=E2\nR   10,9 10,7 R=2 name=R2\nAM  10,7 10,5 name=I_2\nW   9,11 8,11\nW   9,11 10,11\nW   8,5 9,5\nW   10,5 9,5", "box": [1, 2, 17, 14], "lock": ["I_3", "R3"], "best": 14},
+{"id": "r1", "mode": "rush", "title": {"th": "ครึ่งแอมป์", "en": "Half an amp"}, "brief": {"th": "หลอด B1 (12 Ω) ติดเฉพาะเมื่อได้ 0.5 A พอดี จากถ่าน 12 V", "en": "Bulb B1 (12 Ω) lights only at exactly 0.5 A, from a 12 V battery."}, "hint": {"th": "ถ้าต่อหลอดตรงกับถ่าน กระแสเป็น 12/12 = 1 A มากไปสองเท่า ความต้านทานรวมต้องเป็นเท่าไร", "en": "Straight across the battery the bulb gets 12/12 = 1 A, twice too much. What total resistance do you need?"}, "start": "CIRCUIT v1 ideal=1\nDC  2,6 2,4   E=12 name=E\nB   9,4 9,6   R=12 name=B1", "sol": "CIRCUIT v1 ideal=1\nDC  2,6 2,4   E=12 name=E\nB   9,4 9,6   R=12 name=B1\n\nR   4,4 6,4   R=12\nW   2,4 4,4\nW   6,4 9,4\nW   2,6 9,6", "box": [1, 2, 10, 7], "inv": [["res", 1, {"R": 6}], ["res", 1, {"R": 12}], ["res", 1, {"R": 24}], ["wire", 16]], "goals": [{"k": "need", "p": "B1", "x": 0.5}], "par": 1},
+{"id": "r2", "mode": "rush", "title": {"th": "สามในสี่แอมป์", "en": "Three quarters"}, "brief": {"th": "หลอด B1 (6 Ω) ต้องได้ 0.75 A พอดี จากถ่าน 9 V", "en": "Bulb B1 (6 Ω) needs exactly 0.75 A from a 9 V battery."}, "hint": {"th": "ต้องการความต้านทานรวม 12 Ω ตัวต้านทานในคลังรวมกันแบบไหนจึงเพิ่มได้อีก 6 Ω", "en": "You need 12 Ω in total: how can the stock resistors add the missing 6 Ω?"}, "start": "CIRCUIT v1 ideal=1\nDC  2,6 2,4   E=9 name=E\nB   9,4 9,6   R=6 name=B1", "sol": "CIRCUIT v1 ideal=1\nDC  2,6 2,4   E=9 name=E\nB   9,4 9,6   R=6 name=B1\n\nR   4,4 6,4   R=3\nR   6,4 8,4   R=3\nW   2,4 4,4\nW   8,4 9,4\nW   2,6 9,6", "box": [1, 2, 10, 7], "inv": [["res", 2, {"R": 3}], ["res", 1, {"R": 12}], ["wire", 16]], "goals": [{"k": "need", "p": "B1", "x": 0.75}], "par": 2},
+{"id": "r3", "mode": "rush", "title": {"th": "สองดวงสองค่า", "en": "Two bulbs, two currents"}, "brief": {"th": "B1 ต้องได้ 1 A และ B2 ต้องได้ 0.5 A จากถ่าน 12 V หลอดดวงละ 6 Ω", "en": "B1 needs 1 A and B2 needs 0.5 A from a 12 V battery. Each bulb is 6 Ω."}, "hint": {"th": "ถ้าแต่ละดวงอยู่สาขาของตัวเอง ทั้งสองได้ 12 V เท่ากัน แต่ละสาขาต้องมีความต้านทานรวมเท่าไร", "en": "On branches of their own both get 12 V. What total resistance must each branch have?"}, "start": "CIRCUIT v1 ideal=1\nDC  2,7 2,5   E=12 name=E\nB   8,5 8,7   R=6 name=B1\nB   12,5 12,7 R=6 name=B2", "sol": "CIRCUIT v1 ideal=1\nDC  2,7 2,5   E=12 name=E\nB   8,5 8,7   R=6 name=B1\nB   12,5 12,7 R=6 name=B2\n\nR   8,3 8,5   R=6\nR   12,3 12,5 R=18\nW   2,5 2,3 12,3\nW   2,7 12,7", "box": [1, 1, 13, 9], "inv": [["res", 1, {"R": 6}], ["res", 1, {"R": 18}], ["res", 1, {"R": 12}], ["res", 1, {"R": 24}], ["wire", 26]], "goals": [{"k": "need", "p": "B1", "x": 1}, {"k": "need", "p": "B2", "x": 0.5}], "par": 2},
+{"id": "r4", "mode": "rush", "title": {"th": "แรงดันไม่พอ", "en": "Not enough voltage"}, "brief": {"th": "B1 (12 Ω) ต้องได้ 1 A แต่ถ่าน E1 มีแค่ 4 V ใช้ถ่านในคลังเพิ่มแรงดัน", "en": "B1 (12 Ω) needs 1 A, but cell E1 only gives 4 V. Use the cells in stock to raise the voltage."}, "hint": {"th": "ถ่านที่ต่ออนุกรมโดยหันทางเดียวกัน แรงดันบวกกัน ต้องได้ 12 V ต้องใช้กี่ก้อน และขั้ว + อยู่ฝั่งไหน", "en": "Cells in series facing the same way add up. For 12 V, how many do you need, and which side is +?"}, "start": "CIRCUIT v1 ideal=1\nDC  2,8 2,6   E=4 name=E1\nB   9,4 9,6   R=12 name=B1", "sol": "CIRCUIT v1 ideal=1\nDC  2,8 2,6   E=4 name=E1\nB   9,4 9,6   R=12 name=B1\n\nDC  2,6 2,4   E=4\nDC  2,4 2,2   E=4\nW   2,2 9,2 9,4\nW   2,8 9,8 9,6", "box": [1, 1, 11, 9], "inv": [["dc", 3, {"E": 4}], ["res", 1, {"R": 12}], ["wire", 24]], "goals": [{"k": "need", "p": "B1", "x": 1}], "par": 2},
+{"id": "r5", "mode": "rush", "title": {"th": "ขยายด้วยหม้อแปลง", "en": "Step it up"}, "brief": {"th": "ไฟสลับ 10 V (ค่าสูงสุด) ต้องทำให้ B1 (10 Ω) ได้ 2 A (ค่าสูงสุด)", "en": "A 10 V peak AC source must give B1 (10 Ω) 2 A peak."}, "hint": {"th": "ต้องการ 20 V คร่อมหลอด เป็นสองเท่าของแหล่งจ่าย หม้อแปลง 1:2 เปลี่ยนแรงดันได้กี่เท่า และขดไหนต่อกับแหล่งจ่าย", "en": "You need 20 V across the bulb, twice the source. What does a 1:2 transformer do to the voltage, and which coil goes to the source?"}, "start": "CIRCUIT v1 ideal=1\nAC  1,6 1,4   E=10 f=2 name=E\nB   6,4 6,6   R=10 name=B1", "sol": "CIRCUIT v1 ideal=1\nAC  1,6 1,4   E=10 f=2 name=E\nB   6,4 6,6   R=10 name=B1\n\nTP  3,4 3,6   grp=1 n=2\nTS  4,4 4,6   grp=1\nW   1,4 3,4\nW   1,6 3,6\nW   4,4 6,4\nW   4,6 6,6", "box": [0, 2, 8, 8], "ac": true, "inv": [["tr", 1, {"n": 2}], ["res", 1, {"R": 10}], ["wire", 16]], "goals": [{"k": "need", "p": "B1", "x": 2}], "par": 2},
+{"id": "c1", "mode": "chase", "title": {"th": "สายที่หายไป", "en": "The missing wire"}, "brief": {"th": "ไฟฉายไม่ติด มีสายหายไปหนึ่งช่วง หาให้เจอแล้วต่อให้ครบ", "en": "The flashlight is dark: one wire segment is missing. Find it and wire it back."}, "hint": {"th": "ไล่ทางเดินกระแสจากขั้วบวกทีละช่วง ทางขาดที่จุดไหน", "en": "Follow the path from + one stretch at a time. Where does it stop?"}, "start": "CIRCUIT v1 ideal=1\nDC  2,6 2,4   E=9 name=E\nAM  4,2 6,2   name=I\nB   9,4 9,6   R=20 name=B1\nW   2,4 2,2 4,2\nW   6,2 9,2 9,4\nW   9,6 9,8 6,8\nW   5,8 2,8 2,6", "sol": "CIRCUIT v1 ideal=1\nDC  2,6 2,4   E=9 name=E\nAM  4,2 6,2   name=I\nB   9,4 9,6   R=20 name=B1\nW   2,4 2,2 4,2\nW   6,2 9,2 9,4\nW   9,6 9,8 6,8\nW   5,8 2,8 2,6\n\nW   5,8 6,8", "box": [1, 1, 10, 9], "inv": [["wire", 2]], "faults": [{"gap": true}], "goals": [{"k": "lit", "p": "B1"}, {"k": "range", "p": "I", "q": "i", "lo": 0.445, "hi": 0.455}], "par": 0, "tries": 3},
+{"id": "c2", "mode": "chase", "title": {"th": "สายขาดในวงอนุกรม", "en": "A break in the loop"}, "brief": {"th": "หลอดสามดวงดับหมด มีสายช่วงหนึ่งขาดแต่มองไม่เห็น วัดหาแล้วซ่อมให้ถูกจุด ซ่อมผิดได้ 3 ครั้ง", "en": "All three bulbs are dark: one wire segment is broken, but you cannot see which. Measure, then fix the right one. 3 wrong fixes allowed."}, "hint": {"th": "ในวงที่ขาดไม่มีกระแส สายดีๆ จึงมีแรงดันคร่อม 0 V แต่ช่วงที่ขาดจะมีแรงดันของถ่านทั้งหมดคร่อมอยู่", "en": "With the loop broken there is no current, so a good wire has 0 V across it. The broken stretch has the whole battery voltage across it."}, "start": "CIRCUIT v1 ideal=1\nDC  2,9 2,7   E=12 name=E\nB   4,3 6,3   R=8 name=B1\nB   8,3 10,3  R=8 name=B2\nB   12,5 12,7 R=8 name=B3\nW   2,7 2,3 4,3\nW   6,3 8,3\nW   10,3 12,3 12,5\nW   12,7 12,9 2,9", "sol": "CIRCUIT v1 ideal=1\nDC  2,9 2,7   E=12 name=E\nB   4,3 6,3   R=8 name=B1\nB   8,3 10,3  R=8 name=B2\nB   12,5 12,7 R=8 name=B3\nW   2,7 2,3 4,3\nW   6,3 8,3\nW   10,3 12,3 12,5\nW   12,7 12,9 2,9", "box": [1, 2, 13, 10], "faults": [{"w": [7, 9, 8, 9]}], "goals": [{"k": "lit", "p": "B1"}, {"k": "lit", "p": "B2"}, {"k": "lit", "p": "B3"}], "par": 4, "tries": 3},
+{"id": "c3", "mode": "chase", "title": {"th": "ดวงกลางดับ", "en": "The middle bulb is dark"}, "brief": {"th": "หลอดสามดวงขนานกัน ดวงกลางไม่ติด หาว่าพังที่หลอดหรือที่สาย ซ่อมผิดได้ 2 ครั้ง", "en": "Three bulbs in parallel and the middle one is dark. Is it the bulb or a wire? 2 wrong fixes allowed."}, "hint": {"th": "ถ้าหลอดดีแต่สายของมันขาด แรงดันคร่อมหลอดจะเป็นเท่าไร แล้วถ้าไส้หลอดขาดแต่สายดีล่ะ", "en": "If the bulb were fine but a wire of its branch broken, what voltage would it have across it? And if its filament were broken but the wires fine?"}, "start": "CIRCUIT v1 ideal=1\nDC  2,8 2,6   E=12 name=E\nB   6,5 6,7   R=24 name=B1\nB   9,5 9,7   R=24 name=B2\nB   12,5 12,7 R=24 name=B3\nW   2,6 2,3 12,3 12,5\nW   6,3 6,5\nW   9,3 9,5\nW   12,7 12,9 2,9 2,8\nW   6,7 6,9\nW   9,7 9,9", "sol": "CIRCUIT v1 ideal=1\nDC  2,8 2,6   E=12 name=E\nB   6,5 6,7   R=24 name=B1\nB   9,5 9,7   R=24 name=B2\nB   12,5 12,7 R=24 name=B3\nW   2,6 2,3 12,3 12,5\nW   6,3 6,5\nW   9,3 9,5\nW   12,7 12,9 2,9 2,8\nW   6,7 6,9\nW   9,7 9,9", "box": [1, 2, 13, 10], "faults": [{"c": "B2", "kind": "open"}], "goals": [{"k": "lit", "p": "B1"}, {"k": "lit", "p": "B2"}, {"k": "lit", "p": "B3"}], "par": 2, "tries": 2},
+{"id": "c4", "mode": "chase", "title": {"th": "ค่าผิดหนึ่งตัว", "en": "One wrong value"}, "brief": {"th": "ตัวต้านทานควรเป็น 100, 200 และ 300 Ω ให้มิเตอร์อ่าน 2, 4 และ 6 V แต่มีตัวหนึ่งค่าผิด (ค่าซ่อนไว้) ซ่อมผิดได้ 2 ครั้ง", "en": "The resistors should be 100, 200 and 300 Ω so the meters read 2, 4 and 6 V, but one has the wrong value (values are hidden). 2 wrong fixes allowed."}, "hint": {"th": "เทียบอัตราส่วนของแรงดันที่อ่านได้ ตัวต้านทานสองตัวที่อัตราส่วนยังถูกต้องน่าจะปกติดี", "en": "Compare the ratios of the readings: two resistors whose ratio is still right are probably fine."}, "start": "CIRCUIT v1 ideal=1\nDC  2,10 2,8   E=12 name=E\nAM  4,3 6,3    name=I\nR   9,4 9,6    R=100 name=R1\nR   9,8 9,10   R=200 name=R2\nR   9,12 9,14  R=300 name=R3\nVM  12,4 12,6  name=V_R1\nVM  12,8 12,10 name=V_R2\nVM  12,12 12,14 name=V_R3\nGND 4,15 4,17\nW   2,8 2,3 4,3\nW   6,3 9,3 9,4\nW   9,6 9,8\nW   9,10 9,12\nW   9,14 9,15\nW   2,10 2,15 9,15\nW   9,4 12,4\nW   9,6 12,6\nW   9,8 12,8\nW   9,10 12,10\nW   9,12 12,12\nW   9,14 12,14", "sol": "CIRCUIT v1 ideal=1\nDC  2,10 2,8   E=12 name=E\nAM  4,3 6,3    name=I\nR   9,4 9,6    R=100 name=R1\nR   9,8 9,10   R=200 name=R2\nR   9,12 9,14  R=300 name=R3\nVM  12,4 12,6  name=V_R1\nVM  12,8 12,10 name=V_R2\nVM  12,12 12,14 name=V_R3\nGND 4,15 4,17\nW   2,8 2,3 4,3\nW   6,3 9,3 9,4\nW   9,6 9,8\nW   9,10 9,12\nW   9,14 9,15\nW   2,10 2,15 9,15\nW   9,4 12,4\nW   9,6 12,6\nW   9,8 12,8\nW   9,10 12,10\nW   9,12 12,12\nW   9,14 12,14", "box": [1, 2, 13, 18], "faults": [{"c": "R2", "kind": "value", "R": 2000}], "hide": ["R1", "R2", "R3"], "goals": [{"k": "range", "p": "V_R1", "q": "v", "lo": 1.98, "hi": 2.02}, {"k": "range", "p": "V_R2", "q": "v", "lo": 3.96, "hi": 4.04}, {"k": "range", "p": "V_R3", "q": "v", "lo": 5.94, "hi": 6.06}], "par": 0, "tries": 2}
+];
+let G=null, gView={v:'hub'}, gRaf=0;
+const GKEY='circuit-lab-game';
+const gProg = () => { try { const o=JSON.parse(localStorage.getItem(GKEY)||'{}'); return o && typeof o==='object' ? o : {}; } catch(e){ return {}; } };
+const gPut = (id, stars) => { try { const o=gProg(); if (!(o[id]>=stars)) o[id]=stars; localStorage.setItem(GKEY, JSON.stringify(o)); } catch(e){} };
+const gMode = id => GAME_MODES.find(m=>m.id===id);
+const modeLevels = m => LEVELS.filter(l=>l.mode===m);
+const modeDone = m => { const p=gProg(); return modeLevels(m).every(l=>p[l.id]>0); };
+const modeOpen = M => M.tier===1 || modeDone(M.from);
+const levelOpen = l => { const ls=modeLevels(l.mode), i=ls.indexOf(l), p=gProg(); return modeOpen(gMode(l.mode)) && (i===0 || p[ls[i-1].id]>0); };
+const starsHTML = n => `<span class="gst" aria-label="${L(`${n} ดาว`,`${n} stars`)}">${[1,2,3].map(k=>`<i class="${k<=n?'on':''}"></i>`).join('')}</span>`;
+const GFLAGS = ['lock','keep','ghost','hide','inv','trueR'];
+
+// the level circuit as plain data (with the game flags) and back
+function gData(st){
+  return { ideal:st.ideal, comps: st.comps.map(c=>{ const o={type:c.type,ax:c.ax,ay:c.ay,bx:c.bx,by:c.by,num:c.num,name:c.name}; for (const k in T[c.type].def) o[k]=c[k];
+      if (c.off) o.off=1; for (const k of GFLAGS) if (c[k]!==undefined && c[k]!==false) o[k]=c[k]; return o; }),
+    wires: st.wires.map(w=>[w.ax,w.ay,w.bx,w.by,w.off?1:0,w.ghost?1:0,w.lock?1:0]) };
+}
+function gState(d){
+  const st=blankState(d.ideal!==false);
+  swapIn(st, () => {
+    comps=d.comps.filter(o=>T[o.type]).map(o=>{ const p={}; for (const k in T[o.type].def) if (typeof o[k]===typeof T[o.type].def[k]) p[k]=o[k];
+      const c=mk(o.type,o.ax,o.ay,o.bx,o.by,p); if (o.num) c.num=o.num; if (o.name) c.name=o.name; if (o.off) c.off=true; for (const k of GFLAGS) if (o[k]!==undefined) c[k]=o[k]; return c; });
+    for (const a of d.wires){ if (addWire(a[0],a[1],a[2],a[3],!!a[4])===1){ const w=wires[wires.length-1]; if (a[5]) w.ghost=true; if (a[6]) w.lock=true; } }
+    numberAll();
+  });
+  return st;
+}
+const gCodeData = code => { const r=parseCode(code); return r.errs.length ? null : r.data; };
+
+// goals: lit / dark (bulb ≥ 50 mA, LED ≥ 2 mA), range (i or v of a named part), need (Rush: current within ±5%), same (King: a reading kept),
+// meter (any meter of a type reads in a range), eq (two currents equal), max (wires / parts / score at most n). c = only in switch case c
+const LIT = c => c.type==='led' ? 2e-3 : 0.05;
+function gameEval(d, lv, goals){
+  const ac=d.comps.some(o=>o.type==='ac' && !o.off), cases=lv.cases||[null];
+  const counts={wires:d.wires.length, parts:d.comps.length}; counts.score=counts.wires+counts.parts;
+  const out=goals.map(g=>({g, ok:true, val:null, st:''}));
+  cases.forEach((cs, ci) => {
+    const st=gState(d);
+    if (cs) for (const c of st.comps) if (c.type==='sw' && cs[lab(c)]!==undefined) c.on=!!cs[lab(c)];
+    const n=ac?4000:700, from=ac?2000:n, pk=new Map();
+    swapIn(st, () => { for (let k=0;k<n;k++){ step(); if (k>=from && k%2===0){ wireCurrents(); for (const c of comps){ const v=Math.abs(reading(c)); if (!(pk.get(c)>=v)) pk.set(c,v); } } }
+      wireCurrents(); events.length=0; });
+    const P2 = name => st.comps.find(c=>lab(c)===name);
+    const rd = c => !c ? 0 : ac ? (pk.get(c)||0) : reading(c);
+    goals.forEach((g, gi) => {
+      if (g.c!==undefined && g.c!==ci) return;
+      const o=out[gi], c=g.p && P2(g.p); let ok=false, v=null;
+      switch (g.k){
+        case 'lit': v=c ? (ac ? rd(c) : (c.type==='led' ? c.i : Math.abs(c.i))) : 0; ok=!!c && v>=LIT(c); break;
+        case 'dark': v=c ? Math.abs(ac?rd(c):c.i) : 0; ok=v<1e-3; break;
+        case 'range': v=c ? (ac ? rd(c) : (g.q==='v'?c.v:c.i)) : NaN; if (g.abs) v=Math.abs(v); ok=v>=g.lo && v<=g.hi; break;
+        case 'need': v=c ? (ac ? rd(c) : Math.abs(c.i)) : 0; ok=Math.abs(v-g.x)<=g.x*0.05; o.st = ok ? 'ok' : v<g.x ? 'low' : 'high'; break;
+        case 'same': v=rd(c); if (g.abs) v=Math.abs(v); ok=!!c && Math.abs(v-g.val)<=Math.max(1e-6, Math.abs(g.val)*0.01); break;
+        case 'node': { const a=P2(g.a), b=P2(g.b); ok=!!a && !!b && a[g.al==='b'?'rb':'ra']===b[g.bl==='b'?'rb':'ra']; break; }
+        case 'meter': { let best=null; for (const m of st.comps) if (m.type===g.t){ const x=Math.abs(rd(m)); if (best===null || Math.abs(x-(g.lo+g.hi)/2)<Math.abs(best-(g.lo+g.hi)/2)) best=x; } v=best; ok=best!==null && best>=g.lo && best<=g.hi; break; }
+        case 'eq': { const a=P2(g.a), b=P2(g.b), x=rd(a), y=rd(b); v=[x,y]; ok=!!a && !!b && Math.abs(x-y)<=Math.max(1e-6, 0.01*Math.max(Math.abs(x),Math.abs(y))); break; }
+        case 'max': v=counts[g.what]; ok=v<=g.n; break;
+      }
+      o.ok = o.ok && ok; if (v!==null) o.val=v;
+    });
+  });
+  return {ok: out.every(o=>o.ok), goals: out, counts};
+}
+// readings of the start circuit, used to make the King of hill / Zero day goals (keep every meter reading, keep the bulbs lit)
+function gKeepGoals(d, lv){
+  const ac=d.comps.some(o=>o.type==='ac'), st=gState(d), pk=new Map(), n=ac?4000:700;
+  swapIn(st, () => { for (let k=0;k<n;k++){ step(); if (ac && k>=2000 && k%2===0){ wireCurrents(); for (const c of comps){ const v=Math.abs(reading(c)); if (!(pk.get(c)>=v)) pk.set(c,v); } } } wireCurrents(); events.length=0; });
+  const goals=[];
+  for (const c of st.comps){
+    if (c.type==='vm' || c.type==='am') goals.push({k:'same', p:lab(c), val: ac ? (pk.get(c)||0) : reading(c), q:c.type==='vm'?'v':'i'});
+    else if ((c.type==='bulb' || c.type==='led') && Math.abs(ac?(pk.get(c)||0):c.i)>=LIT(c)) goals.push({k:'same', p:lab(c), val:Math.abs(ac?(pk.get(c)||0):c.i), abs:true, q:'i'});   // same brightness
+  }
+  return goals.concat(lv.goals||[]);
+}
+function goalText(g, lv){
+  const cs = g.c!==undefined && lv.cases ? lv.cases[g.c] : null;
+  const pre = cs ? Object.entries(cs).map(([k,v])=>`${k} ${v?L('ต่อ','closed'):L('ตัด','open')}`).join(', ')+' → ' : '';
+  const u = g.q==='v' ? 'V' : 'A', ac = !!lv.ac;
+  if (g.txt) return pre+tx(g.txt);
+  switch (g.k){
+    case 'lit': return pre+L(`${g.p} ติด`,`${g.p} lights`);
+    case 'dark': return pre+L(`${g.p} ดับ`,`${g.p} stays dark`);
+    case 'range': return pre+L(`${g.p} อ่านได้ ${fmt(g.lo,u)} ถึง ${fmt(g.hi,u)}`,`${g.p} reads ${fmt(g.lo,u)} to ${fmt(g.hi,u)}`);
+    case 'need': return L(`${g.p} ติดเมื่อได้ ${fmt(g.x,'A')} (±5%)${ac?' ค่าสูงสุด':''}`,`${g.p} lights only at ${fmt(g.x,'A')} (±5%)${ac?' peak':''}`);
+    case 'same': return g.abs ? L(`${g.p} สว่างเท่าเดิม (${fmt(g.val,'A')})`,`${g.p} as bright as before (${fmt(g.val,'A')})`) : L(`${g.p} ยังอ่านได้ ${fmt(g.val,u)}${ac?' (ค่าสูงสุด)':''}`,`${g.p} still reads ${fmt(g.val,u)}${ac?' (peak)':''}`);
+    case 'meter': return g.t==='am' ? L(`มีแอมมิเตอร์อ่านได้ ${fmt(g.lo,'A')} ถึง ${fmt(g.hi,'A')}`,`An ammeter reads ${fmt(g.lo,'A')} to ${fmt(g.hi,'A')}`) : L(`มีโวลต์มิเตอร์อ่านได้ ${fmt(g.lo,'V')} ถึง ${fmt(g.hi,'V')}`,`A voltmeter reads ${fmt(g.lo,'V')} to ${fmt(g.hi,'V')}`);
+    case 'eq': return L(`${g.a} กับ ${g.b} จ่ายกระแสเท่ากัน`,`${g.a} and ${g.b} carry equal currents`);
+    case 'max': return g.what==='wires' ? L(`สายไฟไม่เกิน ${g.n} ช่วง`,`At most ${g.n} wire segments`) : g.what==='parts' ? L(`อุปกรณ์ไม่เกิน ${g.n} ชิ้น`,`At most ${g.n} parts`) : L(`สาย + อุปกรณ์ไม่เกิน ${g.n}`,`Wires + parts at most ${g.n}`);
+  }
+  return '';
+}
+function goalVal(o, lv){
+  const g=o.g, v=o.val; if (v===null || v===undefined || (typeof v==='number' && !isFinite(v))) return '–';
+  if (g.k==='eq') return v.map(x=>fmt(x,'A')).join(' · ');
+  if (g.k==='max') return String(v);
+  if (g.k==='node') return o.ok ? '✓' : '✗';
+  return fmt(v, g.k==='lit'||g.k==='dark'||g.k==='need'||(g.q!=='v' && g.k!=='meter') ? 'A' : (g.k==='meter' ? (g.t==='am'?'A':'V') : 'V'));
+}
+
+// level start: flags by mode. Solve / Rush: what is placed is locked. King / Zero day: nothing to add, the parts the goals read are kept
+// (they can move, not be deleted). Chase: everything locked, faults hidden (ghost wire or part, wrong value shown as "?")
+function gStart(lv){
+  gStop();
+  const d=gCodeData(lv.start); if (!d) return;
+  const st=gState(d), kh=lv.mode==='king'||lv.mode==='zero';
+  const goals = kh ? gKeepGoals(d, lv) : (lv.goals||[]), must=new Set([...goals.map(g=>g.p), ...goals.map(g=>g.a), ...goals.map(g=>g.b)].filter(Boolean));
+  for (const c of st.comps){ if (kh) c.keep = must.has(lab(c)) || ['dc','ac','tp','ts','gnd'].includes(c.type); else c.lock=true; if ((lv.lock||[]).includes(lab(c))){ c.lock=true; c.keep=false; } }
+  for (const w of st.wires) if (!kh) w.lock=true;
+  for (const f of lv.faults||[]){
+    if (f.w){ const k=wkey({ax:f.w[0],ay:f.w[1],bx:f.w[2],by:f.w[3]}), w=st.wires.find(x=>wkey(x)===k); if (w){ w.off=true; w.ghost=true; } }
+    else { const c=st.comps.find(x=>lab(x)===f.c); if (!c) continue; if (f.kind==='open'){ c.off=true; c.ghost=true; } else if (f.kind==='value'){ c.trueR=c.R; c.R=f.R; } }
+  }
+  for (const n of lv.hide||[]){ const c=st.comps.find(x=>lab(x)===n); if (c) c.hide=true; }
+  G={lv, st, goals, sel:null, armed:null, tool:'build', undo:[], redo:[], t0:performance.now(), hinted:false, sol:false, done:false, fail:false,
+    probes:0, wrong:0, marks:[], probeA:null, res:null, evalSig:'', evalAt:0, last:performance.now(), hover:null, drag:null,
+    inv:(lv.inv||[]).filter(x=>x[0]!=='wire').map(x=>({type:x[0], n:x[1], p:x[2]||{}})), wireMax:((lv.inv||[]).find(x=>x[0]==='wire')||[])[1] ?? (kh?Infinity:0),
+    start:{wires:st.wires.length, parts:st.comps.length}, faults:(lv.faults||[]).filter(f=>!f.gap).length};
+  G.start.score=G.start.wires+G.start.parts;
+}
+function gStop(){ cancelAnimationFrame(gRaf); gRaf=0; }
+const gPlayerWires = () => G.st.wires.filter(w=>!w.lock).length;
+const gInvLeft = it => it.n - G.st.comps.filter(c=>c.inv && (it.type==='tr' ? c.type==='tp' : c.type===it.type) && Object.keys(it.p).every(k=>c[k]===it.p[k])).length;
+function gPush(){ G.undo.push(JSON.stringify(gData(G.st))); if (G.undo.length>60) G.undo.shift(); G.redo.length=0; }
+// swap the level state (undo, redo, a refused wire, the answer) but keep the board geometry of the last frame
+function gSetState(st){ const v=G.st && G.st.view; G.st=st; if (v) st.view=v; G.sel=null; G.evalSig=''; }
+function gRestore(s){ gSetState(gState(JSON.parse(s))); renderInv(); renderActs(); renderHud(); }
+function gUndo(){ if (G.done || !G.undo.length) return; G.redo.push(JSON.stringify(gData(G.st))); gRestore(G.undo.pop()); }
+function gRedo(){ if (G.done || !G.redo.length) return; G.undo.push(JSON.stringify(gData(G.st))); gRestore(G.redo.pop()); }
+function gSay(t){ const el=$('#gMsg'); if (el){ el.textContent=t; el.classList.remove('gpop'); void el.offsetWidth; el.classList.add('gpop'); } }
+
+// board geometry: lv.box = [x0, y0, x1, y1] is the playable area (grid points)
+function gGrid(e){ const v=G.st.view, r=G.cv.getBoundingClientRect(); return { x:(e.clientX-r.left-v.ox)/v.uu-0.5+v.x0, y:(e.clientY-r.top-v.oy)/v.uu-0.5+v.y0 }; }
+const gIn = (x,y) => { const b=G.lv.box; return x>=b[0] && x<=b[2] && y>=b[1] && y<=b[3]; };
+const gSnap = g => { const b=G.lv.box; return { x:Math.max(b[0],Math.min(b[2],Math.round(g.x))), y:Math.max(b[1],Math.min(b[3],Math.round(g.y))) }; };
+function gClamp(c){ const b=G.lv.box, x0=Math.min(c.ax,c.bx), x1=Math.max(c.ax,c.bx), y0=Math.min(c.ay,c.by), y1=Math.max(c.ay,c.by);
+  const dx = x0<b[0] ? b[0]-x0 : x1>b[2] ? b[2]-x1 : 0, dy = y0<b[1] ? b[1]-y0 : y1>b[3] ? b[3]-y1 : 0; c.ax+=dx; c.bx+=dx; c.ay+=dy; c.by+=dy; }
+const gHitComp = g => { const cs=G.st.comps; for (let k=cs.length-1;k>=0;k--) if (segHit(cs[k],g,0.2,0.8,0.5)) return cs[k]; return null; };
+const gHitWire = g => { const ws=G.st.wires; for (let k=ws.length-1;k>=0;k--) if (segHit(ws[k],g,0,1,0.28)) return ws[k]; return null; };
+const gNode = (g, r=0.4) => { const s={x:Math.round(g.x), y:Math.round(g.y)}; return gIn(s.x,s.y) && Math.hypot(g.x-s.x,g.y-s.y)<r ? s : null; };
+
+function gPlace(it, g){
+  if (G.done) return;
+  if (gInvLeft(it)<=0){ gSay(L('ชิ้นนี้หมดแล้ว','None of these left')); return; }
+  const s=gSnap(g); gPush(); let made=null;
+  swapIn(G.st, () => {
+    if (it.type==='tr'){ const used=new Set(comps.filter(c=>c.type==='tp'||c.type==='ts').map(c=>c.grp)); let grp=1; while (used.has(grp)) grp++;
+      const p=mk('tp',s.x-1,s.y,s.x+1,s.y,Object.assign({grp},it.p)), q=mk('ts',s.x-1,s.y+1,s.x+1,s.y+1,{grp}); gClamp(p); if (p.ay+1>G.lv.box[3]){ p.ay--; p.by--; }
+      q.ax=p.ax; q.bx=p.bx; q.ay=q.by=p.ay+1; p.inv=q.inv=true; q.invPair=true; comps.push(p,q); made=p; }
+    else { const c=mk(it.type,s.x-1,s.y,s.x+1,s.y,structuredClone(it.p)); gClamp(c); c.inv=true; comps.push(c); assignNum(c); made=c; }
+    dirty=true;
+  });
+  G.sel=made; G.armed=null; renderInv(); renderActs();
+  gSay(L('วางแล้ว ลากเพื่อย้าย หรือใช้ปุ่มหมุนกับลบด้านล่าง','Placed: drag it to move, or use Rotate and Delete below'));
+}
+function gAddWire(a, b){
+  const pts = a.x!==b.x && a.y!==b.y ? [a, {x:b.x, y:a.y}, b] : [a, b];   // a slanted drag becomes an L: across, then down
+  const before=JSON.stringify(gData(G.st)); let added=0;
+  swapIn(G.st, () => { for (let k=0;k<pts.length-1;k++) added+=addWire(pts[k].x,pts[k].y,pts[k+1].x,pts[k+1].y); if (added) dirty=true; });
+  if (!added) return;
+  if (gPlayerWires()>G.wireMax){ gSetState(gState(JSON.parse(before))); gSay(L(`สายไฟไม่พอ ใช้ได้ ${G.wireMax} ช่วง`,`Not enough wire: ${G.wireMax} segments allowed`)); return; }
+  G.undo.push(before); if (G.undo.length>60) G.undo.shift(); G.redo.length=0; renderHud();
+}
+function gDelete(x){
+  if (!x || G.done) return;
+  if (x.lock){ gSay(L('ชิ้นนี้ล็อกไว้ ลบไม่ได้','This one is locked and cannot be deleted')); return; }
+  if (x.keep){ gSay(L('ชิ้นนี้ต้องอยู่ในวงจร ย้ายได้แต่ลบไม่ได้','This part must stay: it can move but not be deleted')); return; }
+  gPush();
+  swapIn(G.st, () => { if (x.w) wires=wires.filter(w=>w!==x); else { const pair=(x.type==='tp'||x.type==='ts') && x.inv ? comps.find(c=>c!==x && c.grp===x.grp && (c.type==='tp'||c.type==='ts') && c.inv) : null; comps=comps.filter(c=>c!==x && c!==pair); } dirty=true; });
+  G.sel=null; renderInv(); renderActs(); renderHud();
+}
+function gRotate(c){
+  if (!c || c.w || G.done) return;
+  if (c.lock){ gSay(L('ชิ้นนี้ล็อกไว้ หมุนไม่ได้','This one is locked and cannot turn')); return; }
+  gPush(); const mx=(c.ax+c.bx)/2, my=(c.ay+c.by)/2, dx=c.bx-c.ax, dy=c.by-c.ay;
+  c.ax=mx+dy/2; c.ay=my-dx/2; c.bx=mx-dy/2; c.by=my+dx/2; gClamp(c); G.st.dirty=true;
+}
+// Chase: fix a wire or part. A hidden fault is repaired; a good one costs one of the tries
+function gFix(x){
+  if (!x || G.done) return;
+  if (x.ghost || (x.trueR!==undefined && x.R!==x.trueR)){
+    if (x.ghost){ x.off=false; x.ghost=false; } if (x.trueR!==undefined){ x.R=x.trueR; x.hide=false; }
+    G.st.dirty=true; G.marks.push({fix:x}); gSay(L('เจอแล้ว ตรงนี้พังจริง ซ่อมเรียบร้อย','Found it: this one was faulty, now fixed'));
+  } else {
+    G.wrong++; const left=(G.lv.tries||3)-G.wrong;
+    gSay(left>0 ? L(`ตรงนี้ปกติดี เหลือซ่อมได้อีก ${left} ครั้ง ลองวัดเพิ่มก่อน`,`This one is fine. ${left} tries left: measure some more first`) : L('ซ่อมผิดครบแล้ว','Out of tries'));
+    if (left<=0) gFail('tries');
+  }
+  renderHud();
+}
+// Chase probes: voltage between two nodes (from the solved potentials) and the current in a wire or part
+function gNV(p){ let r=null; swapIn(G.st, () => { if (!topo) return; const k=topo.find(K(p.x,p.y)); if (topo.idx.get(k)!==undefined) r=NV(k); }); return r; }
+function gProbe(g){
+  if (G.tool==='volt'){
+    const nd=gNode(g, 0.45); if (!nd) return;
+    if (!G.probeA){ G.probeA=nd; gSay(L('แตะจุดที่สองเพื่ออ่านแรงดันระหว่างสองจุด','Tap a second node to read the voltage between them')); return; }
+    const a=G.probeA, va=gNV(a), vb=gNV(nd); G.probeA=null; if (a.x===nd.x && a.y===nd.y) return;
+    G.probes++; const txt = va===null||vb===null ? L('ไม่ได้ต่อ','not connected') : fmt(va-vb,'V');
+    G.marks=G.marks.filter(m=>!m.v).slice(-2).concat([{v:true, a, b:nd, txt}]);
+    gSay(L(`แรงดันระหว่าง (${a.x},${a.y}) กับ (${nd.x},${nd.y}) = ${txt}`,`Voltage between (${a.x},${a.y}) and (${nd.x},${nd.y}) = ${txt}`));
+  } else if (G.tool==='amp'){
+    const x=gHitComp(g) || gHitWire(g); if (!x) return; G.probes++;
+    const txt=fmt(Math.abs(x.i),'A'); G.marks=G.marks.filter(m=>!m.i).slice(-2).concat([{i:true, x, txt}]);
+    gSay(L(`กระแสใน${x.w?'สายช่วงนี้':' '+lab(x)} = ${txt}`,`Current in ${x.w?'this wire':lab(x)} = ${txt}`));
+  }
+  renderHud();
+}
+
+// win / lose. Stars: Solve wires ≤ par (★★★) or par+4 (★★); Solve+ time left ≥ 1/2 or 1/3; King score ≤ best or par;
+// Zero day only passes at its best; Rush +1 no hint, +1 parts ≤ par; Chase +1 probes ≤ par, +1 no wrong fix
+function gStars(){
+  const lv=G.lv, c=G.res ? G.res.counts : {wires:0,parts:0,score:0};
+  switch (lv.mode){
+    case 'solve': { const w=gPlayerWires(); return w<=lv.par ? 3 : w<=lv.par+4 ? 2 : 1; }
+    case 'solveplus': { const f=gTimeLeft()/lv.time; return f>=0.5 ? 3 : f>=1/3 ? 2 : 1; }
+    case 'king': return c.score<=lv.best ? 3 : c.score<=lv.par ? 2 : 1;
+    case 'zero': return 3;
+    case 'rush': return 1 + (G.hinted?0:1) + (G.st.comps.filter(x=>x.inv).length<=lv.par ? 1 : 0);
+    case 'chase': return 1 + (G.probes<=lv.par ? 1 : 0) + (G.wrong===0 ? 1 : 0);
+  }
+  return 1;
+}
+const gFaultsLeft = () => G.st.comps.some(c=>c.ghost || (c.trueR!==undefined && c.R!==c.trueR)) || G.st.wires.some(w=>w.ghost);
+const gTimeLeft = () => Math.max(0, G.lv.time - (performance.now()-G.t0)/1000);
+function gCanSubmit(){
+  if (!G.res || !G.res.ok) return false;
+  if (G.lv.mode==='king') return G.res.counts.score<G.start.score;
+  if (G.lv.mode==='zero') return G.res.counts.score<=G.lv.best;
+  return true;
+}
+function gWin(){
+  if (G.done) return; G.done=true;
+  const lv=G.lv, n=gStars(), had=modeDone(lv.mode), prev=gProg()[lv.id]||0; gPut(lv.id, n);
+  const M=gMode(lv.mode), pair=GAME_MODES.find(m=>m.from===lv.mode), unlocked = pair && !had && modeDone(lv.mode);
+  const ls=modeLevels(lv.mode), next=ls[ls.indexOf(lv)+1];
+  const c=G.res.counts, stats=[];
+  if (lv.mode==='solve' || lv.mode==='rush') stats.push(L(`ใช้สาย ${gPlayerWires()} ช่วง · วางอุปกรณ์ ${G.st.comps.filter(x=>x.inv).length} ชิ้น`,`${gPlayerWires()} wire segments · ${G.st.comps.filter(x=>x.inv).length} parts placed`));
+  if (lv.mode==='solveplus') stats.push(L(`เหลือเวลา ${Math.ceil(gTimeLeft())} วินาที`,`${Math.ceil(gTimeLeft())} s left`));
+  if (lv.mode==='king' || lv.mode==='zero') stats.push(L(`คะแนน ${c.score} (สาย ${c.wires} + อุปกรณ์ ${c.parts}) · เริ่มที่ ${G.start.score} · ดีที่สุดของเฉลย ${lv.best}`,`Score ${c.score} (${c.wires} wires + ${c.parts} parts) · started at ${G.start.score} · answer's best ${lv.best}`));
+  if ((lv.mode==='king' || lv.mode==='zero') && c.score<lv.best) stats.push(L('ดีกว่าเฉลยอีก ยอดเยี่ยม','Better than the answer. Brilliant'));
+  if (lv.mode==='chase') stats.push(L(`วัด ${G.probes} ครั้ง · ซ่อมผิด ${G.wrong} ครั้ง`,`${G.probes} measurements · ${G.wrong} wrong fixes`));
+  const why=[];
+  if (n<3) why.push(lv.mode==='solve' ? L(`ได้ 3 ดาวเมื่อใช้สายไม่เกิน ${lv.par} ช่วง`,`3 stars with at most ${lv.par} wire segments`)
+    : lv.mode==='solveplus' ? L('ได้ 3 ดาวเมื่อเหลือเวลาอย่างน้อยครึ่งหนึ่ง','3 stars with at least half the time left')
+    : lv.mode==='king' ? L(`ได้ 3 ดาวเมื่อคะแนนไม่เกิน ${lv.best} (2 ดาวที่ ${lv.par})`,`3 stars at a score of ${lv.best} or less (2 stars at ${lv.par})`)
+    : lv.mode==='rush' ? L(`ได้ 3 ดาวเมื่อไม่ใช้คำใบ้ และวางอุปกรณ์ไม่เกิน ${lv.par} ชิ้น`,`3 stars without the hint and with at most ${lv.par} parts`)
+    : L(`ได้ 3 ดาวเมื่อวัดไม่เกิน ${lv.par} ครั้ง และไม่ซ่อมผิด`,`3 stars with at most ${lv.par} measurements and no wrong fix`));
+  gOver(`<p class="gok">${L('ผ่านด่าน','Level passed')}</p>${starsHTML(n)}<h3>${esc(tx(lv.title))}</h3>${stats.map(s=>`<p>${esc(s)}</p>`).join('')}${why.length?`<p class="dim">${esc(why[0])}</p>`:''}
+    ${n>prev && prev ? `<p class="gnew">${L('ทำลายสถิติเดิมของคุณ','A new personal best')}</p>`:''}
+    ${unlocked?`<p class="gunlock">${L(`ปลดล็อก ${pair.title} แล้ว`,`${pair.title} unlocked`)}</p>`:''}
+    <div class="gobtns">${next?`<button class="primary" data-gnext="${next.id}">${L('ด่านถัดไป','Next level')} →</button>`:`<button class="primary" data-gback>${L(`จบ ${M.title} แล้ว เลือกโหมด`,`${M.title} complete: pick a mode`)}</button>`}<button data-gretry>${L('เล่นอีกครั้ง','Play again')}</button><button data-glist>${L('เลือกด่าน','Levels')}</button></div>`, true);
+}
+function gFail(why){
+  if (G.done) return; G.done=true; G.fail=true;
+  gOver(`<p class="gbad">${why==='time'?L('หมดเวลา','Time is up'):L('ซ่อมผิดครบแล้ว','Out of tries')}</p><h3>${esc(tx(G.lv.title))}</h3><p>${why==='time'?L('ลองวางแผนก่อนลงมือ แล้วเล่นใหม่อีกครั้ง','Plan before you build, then try again'):L('ลองวัดแรงดันคร่อมแต่ละช่วงให้มากขึ้นก่อนซ่อม จุดที่ขาดจะมีแรงดันคร่อมอยู่','Measure across more stretches before fixing: a break has voltage across it')}</p>
+    <div class="gobtns"><button class="primary" data-gretry>${L('ลองใหม่','Try again')}</button><button data-gsol>${L('ดูเฉลย','Show the answer')}</button><button data-glist>${L('เลือกด่าน','Levels')}</button></div>`, false);
+}
+function gOver(html, win){ const o=$('#gOver'); if (!o) return; o.innerHTML=`<div class="gobox ${win?'win':'lose'}">${html}</div>`; o.hidden=false; renderHud(); renderActs(); }
+function gShowSol(){
+  const d=gCodeData(G.lv.sol); if (!d) return;
+  gSetState(gState(d)); G.done=true; G.sol=true; G.marks=[]; const o=$('#gOver'); if (o) o.hidden=true;
+  renderPlay(); gSay(L('นี่คือเฉลย ด่านนี้ยังไม่นับว่าผ่าน กด "เริ่มด่านใหม่" เพื่อลองเอง','This is the answer. The level does not count as passed: press "Restart level" to try it yourself'));
+}
+
+// live board: the level runs like the small boards of the lessons, then the overlays of the game are drawn on top
+function gTick(now){
+  if (!G || !G.cv || !G.cv.isConnected){ gRaf=0; return; }
+  const rdt=Math.min(0.05,(now-G.last)/1000); G.last=now;
+  const n=Math.min(80, Math.max(1, Math.round(rdt/DT)));
+  swapIn(G.st, () => { for (let k=0;k<n;k++) step(); wireCurrents(); events.length=0; });
+  const ph=reduce?0.35:1;
+  const need=new Map(); if (G.res) for (const o of G.res.goals) if (o.g.k==='need') need.set(o.g.p, o.st);
+  for (const el of G.st.comps){ el.phase+=flowSpeed(el.i)*rdt*ph; if (el.type==='bulb') el.glow = need.has(lab(el)) && need.get(lab(el))!=='ok' ? 0 : Math.abs(el.v*el.i)/4; if (el.type==='led') el.glow=Math.abs(el.i)/0.02; }
+  for (const el of G.st.wires) el.phase+=flowSpeed(el.i)*rdt*ph;
+  if (G.lv.time && !G.done){ const left=gTimeLeft(), el=$('#gTime'); if (el){ el.textContent=`${Math.floor(left/60)}:${String(Math.floor(left%60)).padStart(2,'0')}`; el.classList.toggle('low', left<15); } if (left<=0) gFail('time'); }
+  if (!G.done && now-G.evalAt>250){ G.evalAt=now; const d=gData(G.st), sig=JSON.stringify(d);
+    if (sig!==G.evalSig){ G.evalSig=sig; G.res=gameEval(d, G.lv, G.goals); renderGoals(); renderHud();
+      if (G.res.ok && !['king','zero'].includes(G.lv.mode) && !gFaultsLeft()) gWin(); } }
+  drawMini(G.cv, G.st, {box:G.lv.box, flow:true, labels:true, dotK:Math.min(1, 34/G.st.view?.uu || 1), maxH: narrow.matches ? Math.max(240, Math.round(innerHeight*0.5)) : 600, after:gOverlay});
+  gRaf=requestAnimationFrame(gTick);
+}
+function gOverlay(x, Px, Py, uu, W, H){
+  const now=performance.now(), fs=Math.max(10,Math.round(uu*0.34));
+  const box=(c,pad)=>partBox(c,Px,Py,uu,pad);
+  if (G.res) for (const o of G.res.goals) if (o.g.k==='need'){ const c=G.st.comps.find(q=>lab(q)===o.g.p); if (!c) continue;
+    const col = o.st==='ok' ? C.accent : o.st==='low' ? C.copper : C.heat, mx=(Px(c.ax)+Px(c.bx))/2, my=(Py(c.ay)+Py(c.by))/2;
+    x.save(); x.strokeStyle=col; x.lineWidth=2.5; x.shadowColor=col; x.shadowBlur=glow(10); x.globalAlpha=0.75+0.25*Math.sin(now/300); x.beginPath(); x.arc(mx,my,uu*0.85,0,7); x.stroke(); x.restore();
+    labelBox(x, `${o.st==='ok'?'✓':o.st==='low'?'↑':'↓'} ${fmt(o.val||0,'A')} / ${fmt(o.g.x,'A')}`, mx, my+uu*1.25, 'c', fs, W, H); }
+  for (const c of G.st.comps) if (c.lock || c.keep){ const b=box(c,0.6); x.save(); x.globalAlpha=0.7; x.fillStyle=c.lock?C.muted:C.copper; const lx=b[0]+b[2]-uu*0.12, ly=b[1]+uu*0.12, s=Math.max(4,uu*0.16);
+    x.fillRect(lx-s, ly, s*2, s*1.4); x.strokeStyle=x.fillStyle; x.lineWidth=Math.max(1.2,uu*0.05); x.beginPath(); x.arc(lx, ly, s*0.75, Math.PI, 0); x.stroke(); x.restore(); }
+  if (G.sel && (G.sel.w ? G.st.wires.includes(G.sel) : G.st.comps.includes(G.sel))){ x.save(); x.strokeStyle=C.accent; x.lineWidth=2; x.setLineDash([6,4]); x.lineDashOffset=-now*0.03; x.shadowColor=C.accent; x.shadowBlur=glow(10);
+    if (G.sel.w){ x.lineWidth=uu*0.3; x.globalAlpha=0.35; x.setLineDash([]); x.beginPath(); x.moveTo(Px(G.sel.ax),Py(G.sel.ay)); x.lineTo(Px(G.sel.bx),Py(G.sel.by)); x.stroke(); } else { rrect(x, box(G.sel,0.7), uu*0.3); x.stroke(); } x.restore(); }
+  const d=G.drag;
+  if (d && d.mode==='wire' && d.to && (d.to.x!==d.from.x || d.to.y!==d.from.y)){ const pts = d.from.x!==d.to.x && d.from.y!==d.to.y ? [d.from,{x:d.to.x,y:d.from.y},d.to] : [d.from,d.to];
+    x.save(); x.strokeStyle=C.accent; x.globalAlpha=0.8; x.lineWidth=Math.max(2,uu*0.14); x.setLineDash([uu*0.2,uu*0.15]); x.beginPath(); pts.forEach((p,k)=>k?x.lineTo(Px(p.x),Py(p.y)):x.moveTo(Px(p.x),Py(p.y))); x.stroke(); x.restore(); }
+  const hv=G.hover; if (hv && !G.done){ x.save(); x.strokeStyle=C.accent; x.lineWidth=2; x.globalAlpha=0.8; x.beginPath(); x.arc(Px(hv.x),Py(hv.y),uu*0.26,0,7); x.stroke(); x.restore(); }
+  if (G.probeA){ x.save(); x.fillStyle=C.copper; x.globalAlpha=0.6+0.4*Math.sin(now/200); x.beginPath(); x.arc(Px(G.probeA.x),Py(G.probeA.y),uu*0.24,0,7); x.fill(); x.restore(); }
+  for (const m of G.marks){
+    if (m.v){ x.save(); x.strokeStyle=C.copper; x.fillStyle=C.copper; x.lineWidth=1.5; x.setLineDash([4,4]); x.beginPath(); x.moveTo(Px(m.a.x),Py(m.a.y)); x.lineTo(Px(m.b.x),Py(m.b.y)); x.stroke();
+      for (const p of [m.a,m.b]){ x.beginPath(); x.arc(Px(p.x),Py(p.y),uu*0.16,0,7); x.fill(); } x.restore();
+      labelBox(x, 'ΔV '+m.txt, (Px(m.a.x)+Px(m.b.x))/2, (Py(m.a.y)+Py(m.b.y))/2-uu*0.5, 'c', fs, W, H); }
+    else if (m.i && (m.x.w ? G.st.wires.includes(m.x) : G.st.comps.includes(m.x))){ labelBox(x, 'I '+m.txt, (Px(m.x.ax)+Px(m.x.bx))/2, (Py(m.x.ay)+Py(m.x.by))/2+uu*0.55, 'c', fs, W, H); }
+    else if (m.fix && (m.fix.w ? G.st.wires.includes(m.fix) : G.st.comps.includes(m.fix))){ const p=m.fix; x.save(); x.strokeStyle=C.accent; x.lineWidth=3; x.shadowColor=C.accent; x.shadowBlur=glow(12);
+      x.beginPath(); x.arc((Px(p.ax)+Px(p.bx))/2,(Py(p.ay)+Py(p.by))/2,uu*0.7,0,7); x.stroke(); x.restore(); }
+  }
+}
+
+// pointer input on the game board (tap a stock item then a node, or drag it in; drag node to node for a wire; drag a part to move it)
+function gBind(cv){
+  cv.addEventListener('pointerdown', e => {
+    if (!G || G.done) return; const g=gGrid(e); cv.setPointerCapture(e.pointerId);
+    if (G.tool==='volt' || G.tool==='amp'){ gProbe(g); return; }
+    if (G.tool==='fix'){ gFix(gHitComp(g) || gHitWire(g)); return; }
+    if (G.armed){ gPlace(G.armed, g); return; }
+    const c=gHitComp(g);
+    if (c){ const q=(c.type==='tp'||c.type==='ts') && c.inv ? G.st.comps.find(k=>k!==c && k.inv && k.grp===c.grp && (k.type==='tp'||k.type==='ts')) : null;   // a placed transformer moves as a pair
+      G.sel=c; G.drag={mode:'move', c, q, start:g, o:[c.ax,c.ay,c.bx,c.by], qo:q&&[q.ax,q.ay,q.bx,q.by], moved:false}; renderActs(); return; }
+    const nd=gNode(g);
+    if (nd && (G.wireMax>0)){ G.drag={mode:'wire', from:nd, to:nd}; return; }
+    G.sel=gHitWire(g); renderActs();
+  });
+  cv.addEventListener('pointermove', e => {
+    if (!G) return; const g=gGrid(e); G.hover = G.tool==='amp'||G.tool==='fix' ? null : gNode(g);
+    const d=G.drag; if (!d) return;
+    if (d.mode==='wire'){ d.to=gSnap(g); return; }
+    const c=d.c; if (c.lock) return;
+    let dx=Math.round(g.x-d.start.x), dy=Math.round(g.y-d.start.y); const [ax,ay,bx,by]=d.o, n={ax:ax+dx, ay:ay+dy, bx:bx+dx, by:by+dy}; gClamp(n);
+    dx=n.ax-ax; dy=n.ay-ay;
+    if (d.q){ const [qa,qb,qc,qd]=d.qo, m={ax:qa+dx, ay:qb+dy, bx:qc+dx, by:qd+dy}; gClamp(m); if (m.ax!==qa+dx || m.ay!==qb+dy) return; }
+    if (n.ax!==c.ax || n.ay!==c.ay){ if (!d.moved){ gPush(); d.moved=true; } Object.assign(c,n); G.st.dirty=true;
+      if (d.q){ const [qa,qb,qc,qd]=d.qo; Object.assign(d.q, {ax:qa+dx, ay:qb+dy, bx:qc+dx, by:qd+dy}); } }
+  });
+  cv.addEventListener('pointerup', () => {
+    if (!G) return; const d=G.drag; G.drag=null; if (!d) return;
+    if (d.mode==='wire'){ if (d.to.x!==d.from.x || d.to.y!==d.from.y) gAddWire(d.from, d.to); return; }
+    if (!d.moved && d.c.type==='sw'){ d.c.on=!d.c.on; G.st.dirty=true; }
+    renderActs();
+  });
+  cv.addEventListener('pointerleave', () => { if (G) G.hover=null; });
+  cv.addEventListener('pointercancel', () => { if (G) G.drag=null; });
+}
+
+// ----- pages: hub, levels of a mode, play
+function gameOpen(){ closeMenu(); gView={v:'hub'}; gamePage.hidden=false; document.body.classList.add('noscroll'); renderGame(); }
+function gameClose(){ gStop(); G=null; gamePage.hidden=true; gameBody.innerHTML=''; document.body.classList.remove('noscroll'); }
+function gameBack(){
+  if (gView.v==='play'){ gStop(); G=null; gView={v:'levels', m:gView.m}; renderGame(); }
+  else if (gView.v==='levels'){ gView={v:'hub'}; renderGame(); }
+  else { gameClose(); openMenu(); }
+}
+function gameGo(lv){ gView={v:'play', m:lv.mode, id:lv.id}; gStart(lv); renderGame(); }
+function renderGame(){
+  const kick=$('#gKick'), title=$('#gTitle');
+  if (gView.v==='hub'){
+    gStop();
+    kick.textContent=L('โหมดเกม','Game modes'); title.textContent=L('เลือกโหมด','Pick a mode');
+    const p=gProg(), card=id=>{ const M=gMode(id), open=modeOpen(M), ls=modeLevels(id), done=ls.filter(l=>p[l.id]>0).length, st=ls.reduce((s,l)=>s+(p[l.id]||0),0), F=M.from&&gMode(M.from);
+      return `<button class="gmode t${M.tier}${open?'':' locked'}" data-gmode="${id}"${open?'':' aria-disabled="true"'}><span class="gmtier">${M.tier===1?L('ขั้นแรก','Tier 1'):L('ขั้นสอง','Tier 2')}</span><b>${esc(M.title)}</b><small>${esc(tx(M.sub))}</small>
+        <span class="gmprog">${open ? `${L(`ผ่าน ${done}/${ls.length} ด่าน`,`${done}/${ls.length} levels`)} · ★ ${st}/${ls.length*3}` : `<i class="glock" aria-hidden="true"></i>${esc(L(`ผ่าน ${F.title} ครบ ${modeLevels(F.id).length} ด่านเพื่อปลดล็อก`,`Pass all ${modeLevels(F.id).length} levels of ${F.title} to unlock`))}`}</span>
+        <span class="gmbar" aria-hidden="true"><i style="width:${ls.length?done/ls.length*100:0}%"></i></span></button>`; };
+    gameBody.innerHTML=`<p class="dlead">${L('สามโหมดแรกเล่นได้เลย โหมดขั้นสองที่ยากกว่าเปิดเมื่อผ่านโหมดคู่ของมันครบทุกด่าน ทุกด่านเล่นบนแผงของเกมเอง วงจรบนแผงหลักไม่เปลี่ยน','The first three modes are open. Each harder tier-two mode opens once you pass every level of its partner. Levels run on a board of their own; the circuit on the main board is not touched.')}</p>
+      <div class="ghub">${[['solve','solveplus'],['king','zero'],['rush','chase']].map(([a,b])=>`<div class="gpair">${card(a)}<span class="garrow" aria-hidden="true"></span>${card(b)}</div>`).join('')}</div>`;
+  } else if (gView.v==='levels'){
+    gStop();
+    const M=gMode(gView.m), ls=modeLevels(M.id), p=gProg();
+    kick.textContent=`${M.tier===1?L('ขั้นแรก','Tier 1'):L('ขั้นสอง','Tier 2')} · ${ls.length} ${L('ด่าน','levels')}`; title.textContent=M.title;
+    gameBody.innerHTML=`<p class="dlead">${fx(M.how)}</p><div class="clist2">${ls.map((l,i)=>{ const open=levelOpen(l);
+      return `<button class="citem glevel${open?'':' locked'}" data-glevel="${l.id}" style="--k:${i}"${open?'':' aria-disabled="true"'}><span class="ctile"><canvas data-gfig="${l.id}" aria-hidden="true"></canvas></span><span class="dtx"><i>${L('ด่าน','Level')} ${i+1}${l.time?` · ${l.time} s`:''}</i><b>${esc(tx(l.title))}</b><small>${open?fx(l.brief):esc(L('ผ่านด่านก่อนหน้าเพื่อเปิด','Pass the level before to open it'))}</small></span>${starsHTML(p[l.id]||0)}</button>`; }).join('')}</div>`;
+    gameBody.querySelectorAll('canvas[data-gfig]').forEach(cv=>{ const l=LEVELS.find(x=>x.id===cv.dataset.gfig), d=l && gCodeData(l.start); if (d) drawMini(cv, gState(d), {fixH:true}); });
+  } else renderPlay();
+  gamePage.querySelector('.gamebox').scrollTop=0;
+}
+function renderPlay(){
+  if (!G) return; const lv=G.lv, M=gMode(lv.mode), ls=modeLevels(lv.mode), i=ls.indexOf(lv), chase=lv.mode==='chase', kh=lv.mode==='king'||lv.mode==='zero';
+  $('#gKick').textContent=`${M.title} · ${L('ด่าน','Level')} ${i+1} / ${ls.length}`; $('#gTitle').textContent=tx(lv.title);
+  gameBody.innerHTML=`<div class="gplay">
+    <div class="gleft"><div class="gboard"><canvas id="gCv" aria-label="${L('แผงของเกม','Game board')}"></canvas><div id="gOver" class="gover" hidden></div></div>
+      ${chase?`<div class="seg gtools" role="group" aria-label="${L('เครื่องมือ','Tools')}">${[['build',L('เลือก / ต่อสาย','Select / wire')],['volt',L('วัดแรงดัน','Voltage')],['amp',L('วัดกระแส','Current')],['fix',L('ซ่อม','Fix')]].map(([k,t])=>`<button data-gtool="${k}" aria-pressed="${G.tool===k}">${t}</button>`).join('')}</div>`:''}
+      <div id="gInv" class="ginv"></div><div id="gActs" class="gacts"></div><p id="gMsg" class="gmsg" role="status"></p></div>
+    <div class="gright"><section class="gcard"><p class="gchip">${esc(M.title)}${lv.time?` · ${L('จำกัดเวลา','timed')}`:''}${lv.ac?` · AC`:''}</p><p class="gbrief">${fx(lv.brief)}</p>
+        <div class="ghint"${G.hinted?'':' hidden'}><b>${L('คำใบ้','Hint')}</b> ${fx(lv.hint)}</div>
+        <div class="dacts"><button data-ghint${G.hinted?' hidden':''}>${L('ขอคำใบ้','Get a hint')}</button>${G.hinted||G.fail?`<button data-gsol>${L('ดูเฉลย','Show the answer')}</button>`:''}</div></section>
+      <section class="ghud" id="gHud"></section>
+      <section class="ggoals"><h4>${L('เป้าหมาย','Goals')}</h4><ul id="gGoals"></ul></section>
+      <div class="gbtns"><button data-gundo title="Ctrl+Z">${L('ย้อนกลับ','Undo')}</button><button data-gredo title="Ctrl+Y">${L('ทำซ้ำ','Redo')}</button><button data-gretry>${L('เริ่มด่านใหม่','Restart level')}</button>${kh?`<button class="primary" data-gsubmit disabled>${L('ส่งแปลน','Submit plan')}</button>`:''}</div></div></div>`;
+  G.cv=$('#gCv'); gBind(G.cv); renderInv(); renderActs(); renderGoals(); renderHud();
+  if (!gRaf){ G.last=performance.now(); gRaf=requestAnimationFrame(gTick); }
+}
+function renderInv(){
+  const el=$('#gInv'); if (!el || !G) return;
+  const items=G.inv.map((it,k)=>{ const left=gInvLeft(it), name=it.type==='tr'?tName('tr'):tName(it.type), val=it.p.R!==undefined?fmt(it.p.R,'Ω'):it.p.E!==undefined?fmt(it.p.E,'V'):it.p.n!==undefined?'1:'+it.p.n:it.p.color!==undefined?LEDC[it.p.color][lang==='en'?'en':'name']:'';
+    return `<button class="gitem${G.armed===it?' on':''}" data-ginv="${k}"${left<=0?' disabled':''} aria-label="${esc(name+' '+val)}"><canvas data-gsym="${it.type}" aria-hidden="true"></canvas><span>${esc(name)}${val?`<em>${esc(val)}</em>`:''}</span><b>×${left}</b></button>`; });
+  const wl = G.wireMax===Infinity ? L('สายไม่จำกัด','unlimited wire') : G.wireMax>0 ? L(`สายเหลือ ${G.wireMax-gPlayerWires()} ช่วง`,`${G.wireMax-gPlayerWires()} wire segments left`) : '';
+  const html = (items.length || wl) ? `<p class="ginvh">${L('คลังอุปกรณ์','Stock')}${wl?` · <span>${wl}</span>`:''}</p><div class="ginvl">${items.join('')}</div>${items.length?`<p class="ginvt">${L('แตะชิ้นแล้วแตะจุดบนแผง หรือลากไปวาง','Tap an item then a node, or drag it onto the board')}</p>`:''}` : '';
+  // the same level and language: only update counts in place, so a drag that has started from a button is never cut off
+  const key=G.lv.id+lang+G.inv.length+!!wl;
+  if (el._key===key){ el.querySelectorAll('[data-ginv]').forEach(b=>{ const it=G.inv[+b.dataset.ginv], left=gInvLeft(it); b.querySelector('b').textContent='×'+left; b.disabled=left<=0; b.classList.toggle('on', G.armed===it); });
+    const w=el.querySelector('.ginvh span'); if (w) w.textContent=wl; return; }
+  el._key=key; el.innerHTML=html;
+  el.querySelectorAll('canvas[data-gsym]').forEach(cv=>{ const t2=cv.dataset.gsym; if (t2==='tr'){ drawSym(cv,'tp'); } else drawSym(cv, t2); });
+  el.querySelectorAll('[data-ginv]').forEach(b=>{ const it=G.inv[+b.dataset.ginv]; let p=null;
+    b.addEventListener('pointerdown', e=>{ if (G.done) return; e.preventDefault(); b.setPointerCapture(e.pointerId); p={sx:e.clientX, sy:e.clientY, moved:false}; });
+    b.addEventListener('pointermove', e=>{ if (p && Math.hypot(e.clientX-p.sx,e.clientY-p.sy)>8) p.moved=true; });
+    b.addEventListener('pointerup', e=>{ if (!p) return; const q=p; p=null; const r=G.cv.getBoundingClientRect();
+      if (q.moved && e.clientX>=r.left && e.clientX<=r.right && e.clientY>=r.top && e.clientY<=r.bottom) gPlace(it, gGrid(e));
+      else if (!q.moved){ G.armed = G.armed===it ? null : it; renderInv(); if (G.armed) gSay(L('แตะจุดบนแผงเพื่อวาง','Tap a node on the board to place it')); } });
+    b.addEventListener('pointercancel', ()=>{ p=null; }); });
+}
+function renderActs(){
+  const el=$('#gActs'); if (!el || !G) return; const x=G.sel;
+  if (!x || G.done || !(x.w ? G.st.wires.includes(x) : G.st.comps.includes(x))){ el.innerHTML=''; return; }
+  const name = x.w ? L('สายไฟ','Wire') : `${lab(x)} · ${tName(x.type)}`, state = x.lock ? L('ล็อกไว้','locked') : x.keep ? L('ต้องอยู่ในวงจร','must stay') : '';
+  el.innerHTML=`<span class="gsel"><b>${subHTML(esc(name))}</b>${state?`<em>${state}</em>`:''}</span>${!x.w && !x.lock?`<button data-grot>${L('หมุน','Rotate')}</button>`:''}${!x.lock && !x.keep?`<button class="danger" data-gdel>${L('ลบ','Delete')}</button>`:''}${!x.w && x.type==='sw'?`<button data-gsw>${x.on?L('ตัดสวิตช์','Open it'):L('ต่อสวิตช์','Close it')}</button>`:''}`;
+}
+function renderGoals(){
+  const el=$('#gGoals'); if (!el || !G) return; const res=G.res;
+  el.innerHTML=G.goals.map((g,k)=>{ const o=res && res.goals[k], ok=o && o.ok;
+    return `<li class="${ok?'ok':''}"><i aria-hidden="true">${ok?'✓':'·'}</i><span>${subHTML(esc(goalText(g, G.lv)))}</span>${o && !['lit','dark','max'].includes(g.k)?`<b>${esc(goalVal(o, G.lv))}</b>`:''}</li>`; }).join('');
+}
+function renderHud(){
+  const el=$('#gHud'); if (!el || !G) return; const lv=G.lv, c=G.res ? G.res.counts : {wires:G.st.wires.length, parts:G.st.comps.length, score:G.st.wires.length+G.st.comps.length}, rows=[];
+  if (lv.time) rows.push([L('เวลา','Time'), `<b id="gTime">${Math.floor(lv.time/60)}:${String(lv.time%60).padStart(2,'0')}</b>`]);
+  if (lv.mode==='solve'||lv.mode==='solveplus'||lv.mode==='rush') rows.push([L('สายที่ใช้','Wire used'), `<b>${gPlayerWires()}</b>${G.wireMax!==Infinity?` / ${G.wireMax}`:''}`]);
+  if (lv.mode==='king'||lv.mode==='zero') rows.push([L('คะแนน (สาย + อุปกรณ์)','Score (wires + parts)'), `<b>${c.score}</b> = ${c.wires} + ${c.parts}`], [L('เริ่มที่ / เป้า','Start / target'), `${G.start.score} / ${lv.mode==='zero'?lv.best:`★★ ${lv.par} · ★★★ ${lv.best}`}`]);
+  if (lv.mode==='chase') rows.push([L('วัดไปแล้ว','Measured'), `<b>${G.probes}</b> ${L('ครั้ง','times')}`], [L('ซ่อมผิดได้อีก','Tries left'), `<b>${(lv.tries||3)-G.wrong}</b>`]);
+  el.innerHTML=rows.map(([k,v])=>`<div class="ghrow"><span>${k}</span><span>${v}</span></div>`).join('') + (G.sol?`<p class="gsoln">${L('กำลังดูเฉลย','Showing the answer')}</p>`:'');
+  const sb=gameBody.querySelector('[data-gsubmit]'); if (sb){ const can=!G.done && gCanSubmit(); sb.disabled=!can;
+    sb.title = can ? '' : lv.mode==='zero' ? L(`ต้องครบทุกเป้าหมาย และคะแนนไม่เกิน ${lv.best}`,`Every goal, and a score of ${lv.best} or less`) : L('ต้องครบทุกเป้าหมาย และคะแนนน้อยกว่าตอนเริ่ม','Every goal, and a lower score than at the start'); }
+  if (G.lv.time && G.done){ const t2=$('#gTime'); if (t2) t2.textContent=`${Math.floor(gTimeLeft()/60)}:${String(Math.floor(gTimeLeft()%60)).padStart(2,'0')}`; }
+  renderInv();
+}
+gameBody.addEventListener('click', e=>{
+  const at=s=>e.target.closest(s); let b;
+  if ((b=at('[data-gmode]'))){ const M=gMode(b.dataset.gmode); if (!modeOpen(M)){ b.classList.remove('shake'); void b.offsetWidth; b.classList.add('shake'); return; } gView={v:'levels', m:M.id}; renderGame(); return; }
+  if ((b=at('[data-glevel]'))){ const l=LEVELS.find(x=>x.id===b.dataset.glevel); if (l && levelOpen(l)) gameGo(l); else if (b){ b.classList.remove('shake'); void b.offsetWidth; b.classList.add('shake'); } return; }
+  if (!G) return;
+  if ((b=at('[data-gtool]'))){ G.tool=b.dataset.gtool; G.probeA=null; G.armed=null; gameBody.querySelectorAll('[data-gtool]').forEach(x=>x.setAttribute('aria-pressed', String(x===b)));
+    gSay(G.tool==='volt'?L('แตะจุดสองจุด เพื่ออ่านแรงดันระหว่างกัน','Tap two nodes to read the voltage between them'):G.tool==='amp'?L('แตะสายหรืออุปกรณ์ เพื่ออ่านกระแสที่ไหลผ่าน','Tap a wire or a part to read its current'):G.tool==='fix'?L(`แตะจุดที่คิดว่าพังเพื่อซ่อม ซ่อมผิดได้ ${(G.lv.tries||3)-G.wrong} ครั้ง`,`Tap what you think is broken to fix it. ${(G.lv.tries||3)-G.wrong} wrong tries left`):''); return; }
+  if (at('[data-ghint]')){ G.hinted=true; renderPlay(); return; }
+  if (at('[data-gsol]')){ gShowSol(); return; }
+  if (at('[data-gundo]')){ gUndo(); return; }
+  if (at('[data-gredo]')){ gRedo(); return; }
+  if (at('[data-gretry]')){ gStart(G.lv); renderPlay(); return; }
+  if (at('[data-glist]')){ gStop(); G=null; gView={v:'levels', m:gView.m}; renderGame(); return; }
+  if (at('[data-gback]')){ gStop(); G=null; gView={v:'hub'}; renderGame(); return; }
+  if ((b=at('[data-gnext]'))){ const l=LEVELS.find(x=>x.id===b.dataset.gnext); if (l) gameGo(l); return; }
+  if (at('[data-gsubmit]')){ if (gCanSubmit()) gWin(); return; }
+  if (at('[data-grot]')){ gRotate(G.sel); return; }
+  if (at('[data-gdel]')){ gDelete(G.sel); return; }
+  if (at('[data-gsw]')){ if (G.sel && G.sel.type==='sw'){ G.sel.on=!G.sel.on; G.st.dirty=true; renderActs(); } return; }
+});
+$('#gBack').onclick=gameBack; $('#gClose').onclick=gameClose;
+gamePage.addEventListener('click', e=>{ if (e.target===gamePage) gameClose(); });
+function gameKey(e){
+  if (e.key==='Escape'){ if (G && (G.armed || G.probeA)){ G.armed=null; G.probeA=null; renderInv(); return; } gameBack(); return; }
+  if (!G || gView.v!=='play' || /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
+  const mod=e.ctrlKey||e.metaKey, k=e.key.toLowerCase();
+  if (mod && k==='z'){ e.preventDefault(); e.shiftKey ? gRedo() : gUndo(); }
+  else if (mod && k==='y'){ e.preventDefault(); gRedo(); }
+  else if (!mod && k==='r'){ gRotate(G.sel); }
+  else if (!mod && (e.key==='Delete' || e.key==='Backspace')){ e.preventDefault(); gDelete(G.sel); }
+}
+
 // language: switch every text on the page. Static texts carry their English in data-en (inner HTML) and data-en-title / -aria-label /
 // -placeholder; everything written by the script goes through L(). A circuit title that is one of ours (default name, example) is switched too
 function namePairs(){
@@ -2193,6 +2895,7 @@ function applyLang(){
   renderInsp(); renderList(); if (popAnchor) renderPop(); updateStatusHint(); drawScope();
   if (!$('#savePanel').hidden) renderSaves();
   if (!docPage.hidden) renderDoc();
+  if (!gamePage.hidden) renderGame();
   if (!menuPanel.hidden) drawMenuIcons();
 }
 
@@ -2273,7 +2976,7 @@ function loop(now){
     if (sel){ hist.v.push(sel.v||0); hist.i.push(sel.i||0); if (hist.v.length>360){ hist.v.shift(); hist.i.shift(); } }
   }
   updateFx(rdt);
-  if (docPage.hidden) draw();
+  if (docPage.hidden && gamePage.hidden) draw();
   if (++fr%6===0){ updateReads(); updateStatusHint(); drawScope(); updateEnergy(); updateList(); }
   requestAnimationFrame(loop);
 }

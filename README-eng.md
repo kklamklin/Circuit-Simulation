@@ -20,10 +20,11 @@ Open `index.html` in a browser (keep `style.css`, `app.js` and `knowledge.js` in
 - **Burnout and explosions** (real mode). Exceed a rating and a component burns out, explodes or melts. Each part breaks into its own debris (glass shards from a bulb, a flying lid and foil strips from a capacitor, acid splashes from a battery), with a fireball, shockwave, electric arcs and a scorch mark left on the board. A fuse can cut the circuit first.
 - **Oscilloscope.** Plot voltage and current of the selected component over time.
 - **Text circuit code.** Import and export circuits as plain text, so an AI assistant can write a circuit from a problem statement and you paste it in to build it instantly.
-- **Saved circuits** in the browser, and undo with Ctrl+Z.
+- **Saved circuits** in the browser, with undo (Ctrl+Z) and redo (Ctrl+Y).
 - **Sound.** A click sound on every click, and a notification sound when current starts to flow in the circuit (again whenever it flows after the circuit has gone quiet). The "Sound" switch in the menu turns it off.
 - **Menu (top left, three lines).** A "Components" page explains all 15 parts (symbol, what it does, how it behaves, formulas, settings, ideal and real mode, what to watch out for, and a basic circuit running live on the page). A "Circuits" page explains the basic ideas (nodes, short circuits, KCL, KVL and more) and 13 example circuits, and a "Circuit plans" page holds ready-made and saved circuits. "Try it on the board" opens that circuit on the main board.
 - **Step-by-step lessons.** Every circuit and idea in the menu is a lesson: meet the circuit (the board lights up each part and says what it does) → watch the current (paths with current glow, the rest goes dark, with a slow-motion button) → why it works (with an everyday comparison) → read the meters (live numbers, with the peak for AC) → guess first (the board pauses and hides its meters until you answer; a wrong answer gets a hint) → your turn. Tap a part on the small board to see what it does, or tap a switch to flip it. The left and right arrow keys change steps.
+- **Game modes** (menu item 04), played on a board of their own: 6 modes and 27 levels. Solve it! (limited parts: make it work), King of hill (the same plan with fewer wires and parts), Rush (bulbs that light only at the right current, or need a higher voltage), and the tier-two modes that open once their partner is complete: Solve it + (against the clock), Zero day (the best plan, with extra conditions) and Chase! (find what is missing or broken with the meters, then fix it). Each level earns 1 to 3 stars and has a hint and an answer; the browser remembers your progress.
 - **Circuit plans.** The "Ready-made" tab has 35 circuits in 9 topics (DC, series and parallel, meters, switches, capacitors and inductors, AC, diodes and LEDs, transformers, real mode). The "Mine" tab lists the circuits you saved: save the board from there, watch a saved circuit run, open it on the main board, or delete it. A plan also opens from a link, for example `index.html#bridge_smooth`.
 - **Thai or English.** Thai is the default; choose English in the menu and every text on the page switches. The browser remembers the choice.
 - **Works on phones and tablets.** The whole board fits on the first screen, with the toolbar above it, the component palette beside it (fold it away with the side-panel button), and the controls and readouts below. On phones the effects are lightened automatically so it stays smooth.
@@ -59,6 +60,19 @@ Press the keys 1 to 5 to switch tools.
 | 5 | Idle | Clicks do nothing |
 
 "Disable" keeps a component or wire on the board but takes it out of the circuit.
+
+Other shortcuts (press ? or the ? button on the toolbar to see them all):
+
+| Key | What it does |
+|---|---|
+| Drag a box (select tool) / Shift+drag | Select several things, then drag any of them to move the group |
+| Shift+click, Ctrl+A | Add to or remove from the group, select everything |
+| Ctrl+C / Ctrl+V / Ctrl+D | Copy / paste / duplicate (new numbers; a transformer keeps its own pair) |
+| Ctrl+Z / Ctrl+Y | Undo / redo |
+| R, Delete | Rotate, delete the selection (a whole group too) |
+| ↑ / ↓ or the mouse wheel | Step the main value of the selected part (R, C, L in 1-2-5 steps, EMF by 1 V, LED colour) |
+| Shift+arrows | Move the selection one cell |
+| Space | Pause / resume |
 
 ## Circuit code (CIRCUIT v1)
 

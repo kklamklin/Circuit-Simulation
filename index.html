@@ -62,6 +62,8 @@
       <button class="mitem" data-go="devs"><span class="mico"><canvas aria-hidden="true"></canvas></span><span class="mtxt"><i>01</i><b data-en="Components">อุปกรณ์</b><small data-en="Every part on the board: what it does, how it behaves, a basic circuit">อุปกรณ์ทุกชิ้นบนแผง ทำอะไร พฤติกรรม และวงจรพื้นฐาน</small></span><svg class="mgo" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       <button class="mitem" data-go="circs"><span class="mico"><canvas aria-hidden="true"></canvas></span><span class="mtxt"><i>02</i><b data-en="Circuits">วงจร</b><small data-en="Step-by-step lessons on kinds of circuits and ideas like nodes and short circuits">บทเรียนทีละขั้น วงจรแบบต่างๆ และแนวคิดอย่างโหนดกับวงจรลัด</small></span><svg class="mgo" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       <button class="mitem" data-go="plans"><span class="mico"><canvas aria-hidden="true"></canvas></span><span class="mtxt"><i>03</i><b data-en="Circuit plans">แปลนวงจร</b><small data-en="Ready-made circuits with step-by-step lessons, and the circuits you saved">วงจรสำเร็จรูปพร้อมบทเรียนทีละขั้น และวงจรที่คุณบันทึกไว้</small></span><svg class="mgo" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <p class="msec" data-en="Play">เล่น</p>
+      <button class="mitem" data-go="game"><span class="mico"><canvas aria-hidden="true"></canvas></span><span class="mtxt"><i>04</i><b data-en="Game modes">โหมดเกม</b><small data-en="Solve it!, King of hill, Rush and their harder tier-two modes">Solve it!, King of hill, Rush และโหมดขั้นสองที่ยากกว่า</small></span><svg class="mgo" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       <p class="msec" data-en="Settings">ตั้งค่า</p>
       <div class="mrow"><span class="mtxt"><b data-en="Language">ภาษา</b><small data-en="Every text on the page">ทุกข้อความบนหน้าเว็บ</small></span><div class="seg" role="group" aria-label="ภาษา" data-en-aria-label="Language"><button data-lang="th" aria-pressed="true">ไทย</button><button data-lang="en" aria-pressed="false">English</button></div></div>
       <div class="mrow"><span class="mtxt"><b data-en="Sound">เสียง</b><small data-en="Clicks, and a chime when current starts to flow">เสียงคลิก และเสียงแจ้งเมื่อวงจรมีไฟไหล</small></span><button id="snd" class="tgl" role="switch" aria-checked="true" aria-label="เสียง" data-en-aria-label="Sound"><span class="knob" aria-hidden="true"></span><span class="tl">เปิด</span></button></div>
@@ -74,12 +76,24 @@
       <div id="docBody" class="docbody"></div>
     </div>
   </div>
+  <div id="gamePage" class="docw gamew" hidden>
+    <div class="docbox gamebox" role="dialog" aria-modal="true" aria-labelledby="gTitle">
+      <div class="dochd"><button id="gBack" class="xbtn" aria-label="ย้อนกลับ" title="ย้อนกลับ" data-en-aria-label="Back" data-en-title="Back"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button><div class="dtit"><p id="gKick" class="dkick2"></p><h2 id="gTitle"></h2></div><button id="gClose" class="xbtn" aria-label="ปิด" title="ปิด" data-en-aria-label="Close" data-en-title="Close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></div>
+      <div id="gameBody" class="docbody"></div>
+    </div>
+  </div>
   <div id="confirm" class="modal" hidden>
     <div class="mbox" role="alertdialog" aria-modal="true" aria-labelledby="qTitle" aria-describedby="qMsg">
       <p class="kicker" data-en="Please confirm">ยืนยันก่อนดำเนินการ</p>
       <h2 id="qTitle"></h2>
       <p id="qMsg"></p>
       <div class="bar"><button id="cNo" data-en="Cancel">ยกเลิก</button><button id="cOk">ยืนยัน</button></div>
+    </div>
+  </div>
+  <div id="keysPanel" class="modal codem" hidden>
+    <div class="mbox keysbox" role="dialog" aria-modal="true" aria-labelledby="kHead">
+      <div class="chd"><h2 id="kHead" data-en="Keyboard shortcuts">คีย์ลัด</h2><button id="kClose" class="xbtn" aria-label="ปิด" title="ปิด" data-en-aria-label="Close" data-en-title="Close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></div>
+      <div id="kBody"></div>
     </div>
   </div>
   <div id="toastf" class="toastf" role="status" aria-live="polite" hidden><span id="tKick"></span><b id="tText"></b></div>
@@ -131,6 +145,8 @@
           <button data-tool="idle" aria-pressed="false" title="คลิกบนแผงแล้วไม่มีอะไรเปลี่ยน" data-en-title="Clicking the board changes nothing" data-en="Idle &lt;kbd&gt;5&lt;/kbd&gt;">ว่าง <kbd>5</kbd></button>
         </div>
         <button id="undo" title="ย้อนกลับ (Ctrl+Z)" aria-label="ย้อนกลับ" data-en-title="Undo (Ctrl+Z)" data-en-aria-label="Undo"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M9 4 4 9l5 5M4 9h10a6 6 0 0 1 0 12h-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-en="Undo">ย้อนกลับ</span></button>
+        <button id="redo" title="ทำซ้ำ (Ctrl+Y)" aria-label="ทำซ้ำ" data-en-title="Redo (Ctrl+Y)" data-en-aria-label="Redo"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M15 4l5 5-5 5M20 9H10a6 6 0 0 0 0 12h3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-en="Redo">ทำซ้ำ</span></button>
+        <button id="keysBtn" class="keysbtn" title="คีย์ลัดทั้งหมด (?)" aria-label="คีย์ลัด" data-en-title="All keyboard shortcuts (?)" data-en-aria-label="Keyboard shortcuts">?</button>
       </div>
       <div class="stage" id="stage">
         <canvas id="board" aria-label="แผงโนดสำหรับต่อวงจร" data-en-aria-label="Node board for building circuits"></canvas>
